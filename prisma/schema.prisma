@@ -1,0 +1,270 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  PERSONNEL
+}
+
+enum DailyTaskStatus {
+  PLANNED
+  ON_SITE
+  COMPLETED
+}
+
+enum TaskEventType {
+  TASK_CREATED
+  TASK_UPDATED
+  PERSON_ASSIGNED
+  ARRIVED_SITE
+  LEFT_SITE
+  NOTE_ADDED
+  FILE_ADDED
+}
+
+enum TimelineEventType {
+  PROJECT_CREATED
+  TASK_CREATED
+  TASK_UPDATED
+  PERSON_ASSIGNED
+  ARRIVED_SITE
+  LEFT_SITE
+  NOTE_ADDED
+  FILE_ADDED
+}
+
+enum OfflinePendingType {
+  ARRIVED_SITE
+  LEFT_SITE
+  NOTE
+  FILE
+  PHOTO
+}
+
+enum OfflinePendingStatus {
+  PENDING
+  SYNCED
+  FAILED
+}
+
+model User {
+  id             String    @id @default(cuid())
+  username       String    @unique @map("username")
+  passwordHash   String    @map("password_hash")
+  fullName       String    @map("full_name")
+  role           UserRole
+  isActive       Boolean   @default(true) @map("is_active")
+  lastLatitude   Decimal?  @map("last_latitude") @db.Decimal(10, 7)
+  lastLongitude  Decimal?  @map("last_longitude") @db.Decimal(10, 7)
+  lastLocationAt DateTime? @map("last_location_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  createdTasks   DailyTask[]            @relation("DailyTaskCreatedBy")
+  taskAssignees  DailyTaskAssignee[]
+  taskEvents     TaskEvent[]
+  timelineEvents ProjectTimelineEvent[]
+  uploadedFiles  ProjectFile[]
+  projectNotes   ProjectNote[]
+  sessions       Session[]
+  offlineItems   OfflinePendingItem[]
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  tokenHash String   @unique @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model Customer {
+  id        String   @id @default(cuid())
+  name      String
+  info      String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  projects Project[]
+
+  @@index([name])
+  @@map("customers")
+}
+
+model Project {
+  id            String   @id @default(cuid())
+  customerId    String   @map("customer_id")
+  name          String
+  description   String?
+  location      String?
+  googleMapsUrl String?  @map("google_maps_url")
+  latitude      Decimal? @db.Decimal(10, 7)
+  longitude     Decimal? @db.Decimal(10, 7)
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  customer       Customer               @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  files          ProjectFile[]
+  notes          ProjectNote[]
+  dailyTasks     DailyTask[]
+  taskEvents     TaskEvent[]
+  timelineEvents ProjectTimelineEvent[]
+
+  @@index([customerId])
+  @@index([name])
+  @@map("projects")
+}
+
+model ProjectNote {
+  id        String   @id @default(cuid())
+  projectId String   @map("project_id")
+  userId    String   @map("user_id")
+  note      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([projectId, createdAt])
+  @@index([userId])
+  @@map("project_notes")
+}
+
+model DailyTask {
+  id              String          @id @default(cuid())
+  taskDate        DateTime        @map("task_date") @db.Date
+  projectId       String          @map("project_id")
+  title           String
+  managerNote     String?         @map("manager_note")
+  status          DailyTaskStatus @default(PLANNED)
+  arrivedAt       DateTime?       @map("arrived_at")
+  leftAt          DateTime?       @map("left_at")
+  durationMinutes Int?            @map("duration_minutes")
+  createdByUserId String          @map("created_by_user_id")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  project        Project                @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  createdBy      User                   @relation("DailyTaskCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  assignees      DailyTaskAssignee[]
+  events         TaskEvent[]
+  timelineEvents ProjectTimelineEvent[]
+  files          ProjectFile[]
+
+  @@index([taskDate, status])
+  @@index([projectId])
+  @@index([createdByUserId])
+  @@map("daily_tasks")
+}
+
+model DailyTaskAssignee {
+  id          String @id @default(cuid())
+  dailyTaskId String @map("daily_task_id")
+  userId      String @map("user_id")
+
+  dailyTask DailyTask @relation(fields: [dailyTaskId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([dailyTaskId, userId])
+  @@index([userId])
+  @@map("daily_task_assignees")
+}
+
+model TaskEvent {
+  id          String        @id @default(cuid())
+  dailyTaskId String        @map("daily_task_id")
+  projectId   String        @map("project_id")
+  userId      String        @map("user_id")
+  type        TaskEventType
+  note        String?
+  latitude    Decimal?      @db.Decimal(10, 7)
+  longitude   Decimal?      @db.Decimal(10, 7)
+  createdAt   DateTime      @default(now()) @map("created_at")
+
+  dailyTask DailyTask @relation(fields: [dailyTaskId], references: [id], onDelete: Cascade)
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([dailyTaskId, createdAt])
+  @@index([projectId, createdAt])
+  @@index([userId])
+  @@map("task_events")
+}
+
+model ProjectTimelineEvent {
+  id          String            @id @default(cuid())
+  projectId   String            @map("project_id")
+  dailyTaskId String?           @map("daily_task_id")
+  userId      String?           @map("user_id")
+  eventType   TimelineEventType @map("event_type")
+  title       String
+  description String?
+  fileId      String?           @map("file_id")
+  createdAt   DateTime          @default(now()) @map("created_at")
+
+  project   Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  dailyTask DailyTask?   @relation(fields: [dailyTaskId], references: [id], onDelete: SetNull)
+  user      User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  file      ProjectFile? @relation(fields: [fileId], references: [id], onDelete: SetNull)
+
+  @@index([projectId, createdAt])
+  @@index([dailyTaskId])
+  @@index([userId])
+  @@index([fileId])
+  @@map("project_timeline_events")
+}
+
+model ProjectFile {
+  id               String   @id @default(cuid())
+  projectId        String   @map("project_id")
+  dailyTaskId      String?  @map("daily_task_id")
+  uploadedByUserId String   @map("uploaded_by_user_id")
+  originalName     String   @map("original_name")
+  mimeType         String   @map("mime_type")
+  sizeBytes        BigInt   @map("size_bytes")
+  storagePath      String   @map("storage_path")
+  note             String?
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  project        Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  dailyTask      DailyTask?             @relation(fields: [dailyTaskId], references: [id], onDelete: SetNull)
+  uploadedBy     User                   @relation(fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+  timelineEvents ProjectTimelineEvent[]
+
+  @@index([projectId, createdAt])
+  @@index([dailyTaskId])
+  @@index([uploadedByUserId])
+  @@map("project_files")
+}
+
+model OfflinePendingItem {
+  id           String               @id @default(cuid())
+  userId       String               @map("user_id")
+  type         OfflinePendingType
+  status       OfflinePendingStatus @default(PENDING)
+  clientItemId String               @unique @map("client_item_id")
+  payload      Json
+  lastError    String?              @map("last_error")
+  createdAt    DateTime             @default(now()) @map("created_at")
+  syncedAt     DateTime?            @map("synced_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@map("offline_pending_items")
+}
