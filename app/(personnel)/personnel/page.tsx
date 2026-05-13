@@ -25,25 +25,53 @@ export default function PersonnelPage() {
 
 async function getPersonnelTasks() {
   const user = await requireRole("PERSONNEL");
+  const today = getTodayDateOnly();
+  const tomorrow = new Date(today);
+  tomorrow.setUTCDate(today.getUTCDate() + 1);
 
-  return prisma.dailyTask.findMany({
-    where: {
-      taskDate: getTodayDateOnly(),
-      assignees: {
-        some: {
-          userId: user.id,
+  const [todayTasks, tomorrowTasks] = await Promise.all([
+    prisma.dailyTask.findMany({
+      where: {
+        taskDate: today,
+        assignees: {
+          some: {
+            userId: user.id,
+          },
         },
       },
-    },
-    include: {
-      project: {
-        include: {
-          customer: true,
+      include: {
+        project: {
+          include: {
+            customer: true,
+          },
         },
       },
-    },
-    orderBy: [{ status: "asc" }, { createdAt: "asc" }],
-  });
+      orderBy: [{ status: "asc" }, { createdAt: "asc" }],
+    }),
+    prisma.dailyTask.findMany({
+      where: {
+        taskDate: tomorrow,
+        assignees: {
+          some: {
+            userId: user.id,
+          },
+        },
+      },
+      include: {
+        project: {
+          include: {
+            customer: true,
+          },
+        },
+      },
+      orderBy: [{ status: "asc" }, { createdAt: "asc" }],
+    }),
+  ]);
+
+  return {
+    todayTasks,
+    tomorrowTasks,
+  };
 }
 
 async function TaskCards({
@@ -51,9 +79,9 @@ async function TaskCards({
 }: {
   tasksPromise: ReturnType<typeof getPersonnelTasks>;
 }) {
-  const tasks = await tasksPromise;
+  const { todayTasks, tomorrowTasks } = await tasksPromise;
 
-  if (tasks.length === 0) {
+  if (todayTasks.length === 0 && tomorrowTasks.length === 0) {
     return (
       <section className="mt-8 rounded-lg border bg-white p-8 text-center shadow-sm">
         <h2 className="text-lg font-semibold">Bugun atanmis is yok</h2>
@@ -65,8 +93,18 @@ async function TaskCards({
   }
 
   return (
-    <section className="mt-8 flex flex-col gap-4">
-      {tasks.map((task) => {
+    <div className="mt-8 flex flex-col gap-6">
+      {todayTasks.length === 0 ? (
+        <section className="rounded-lg border bg-white p-8 text-center shadow-sm">
+          <h2 className="text-lg font-semibold">Bugun atanmis is yok</h2>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            Yarinin programi asagida bilgi amacli gorunur.
+          </p>
+        </section>
+      ) : null}
+
+      <section className="flex flex-col gap-4">
+      {todayTasks.map((task) => {
         const completed = task.status === "COMPLETED";
 
         return (
@@ -82,15 +120,39 @@ async function TaskCards({
                 <h2 className="text-2xl font-semibold leading-tight">
                   {task.project.name}
                 </h2>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  {task.project.customer.name}
-                </p>
               </div>
               <StatusBadge status={task.status} />
             </div>
           </Link>
         );
       })}
-    </section>
+      </section>
+
+      {tomorrowTasks.length > 0 ? (
+        <section className="mt-8 border-t pt-6 opacity-55">
+          <h2 className="text-sm font-semibold uppercase text-muted-foreground">
+            Yarinin Programi
+          </h2>
+          <div className="mt-3 flex flex-col gap-2">
+            {tomorrowTasks.map((task) => (
+              <article
+                aria-disabled="true"
+                className="cursor-not-allowed rounded-md border bg-white p-3 shadow-sm"
+                key={task.id}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <h3 className="text-base font-semibold leading-tight">
+                      {task.project.name}
+                    </h3>
+                  </div>
+                  <StatusBadge status={task.status} />
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+    </div>
   );
 }

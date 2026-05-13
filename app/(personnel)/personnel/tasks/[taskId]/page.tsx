@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { FileText, MapPin } from "lucide-react";
 
@@ -71,17 +70,13 @@ export default async function PersonnelTaskDetailPage({
     (task.project.latitude && task.project.longitude
       ? `https://www.google.com/maps?q=${task.project.latitude},${task.project.longitude}`
       : null);
+  const visibleTimelineEvents = task.project.timelineEvents.filter((event) =>
+    ["FILE_ADDED", "NOTE_ADDED"].includes(event.eventType),
+  );
 
   return (
     <main className="p-6">
       <div className="mx-auto flex max-w-md flex-col gap-6">
-        <Link
-          className="text-sm font-medium text-muted-foreground hover:text-foreground"
-          href="/personnel"
-        >
-          Bugunku islere don
-        </Link>
-
         <section className="rounded-lg border bg-white p-5 text-center shadow-sm">
           <h1 className="text-2xl font-semibold">{task.project.name}</h1>
           <p className="mt-2 text-sm text-muted-foreground">
@@ -151,18 +146,7 @@ export default async function PersonnelTaskDetailPage({
           <h2 className="text-lg font-semibold">Proje Bilgileri</h2>
           <div className="mt-4 flex flex-col gap-3 text-sm">
             <Info label="Tarih" value={formatDisplayDateOnly(task.taskDate)} />
-            <Info label="Konum" value={task.project.location || "-"} />
-            {mapsUrl ? (
-              <a
-                className="inline-flex items-center gap-2 font-medium text-primary hover:underline"
-                href={mapsUrl}
-                rel="noreferrer"
-                target="_blank"
-              >
-                <MapPin className="h-4 w-4" aria-hidden="true" />
-                Google Maps'te ac
-              </a>
-            ) : null}
+            <LocationInfo location={task.project.location} mapsUrl={mapsUrl} />
             <Info label="Aciklama" value={task.project.description || "-"} />
             {task.managerNote ? (
               <Info label="Yonetici Notu" value={task.managerNote} />
@@ -191,13 +175,13 @@ export default async function PersonnelTaskDetailPage({
 
         <section className="rounded-lg border bg-white p-5 shadow-sm">
           <h2 className="text-lg font-semibold">Proje Gecmisi</h2>
-          {task.project.timelineEvents.length === 0 ? (
+          {visibleTimelineEvents.length === 0 ? (
             <p className="mt-4 text-sm text-muted-foreground">
-              Timeline kaydi yok.
+              Ek not veya dosya yok.
             </p>
           ) : (
             <ol className="mt-4 flex flex-col gap-3">
-              {task.project.timelineEvents.map((event) => (
+              {visibleTimelineEvents.map((event) => (
                 <li className="rounded-md border p-3" key={event.id}>
                   <div className="flex items-start justify-between gap-3">
                     <div>
@@ -209,7 +193,7 @@ export default async function PersonnelTaskDetailPage({
                       </p>
                     </div>
                   </div>
-                  {event.description ? (
+                  {event.description && event.description !== event.file?.originalName ? (
                     <p className="mt-3 text-sm leading-6">{event.description}</p>
                   ) : null}
                   {event.file ? (
@@ -238,6 +222,37 @@ function Info({ label, value }: { label: string; value: string }) {
         {label}
       </p>
       <p className="mt-1 leading-6">{value}</p>
+    </div>
+  );
+}
+
+function LocationInfo({
+  location,
+  mapsUrl,
+}: {
+  location: string | null;
+  mapsUrl: string | null;
+}) {
+  return (
+    <div>
+      <p className="text-xs font-medium uppercase text-muted-foreground">
+        Konum
+      </p>
+      {mapsUrl ? (
+        <a
+          className="mt-1 inline-flex max-w-full items-center gap-2 rounded-md border border-primary/20 bg-primary/10 px-3 py-2 font-medium text-primary transition hover:bg-primary/15"
+          href={mapsUrl}
+          rel="noreferrer"
+          target="_blank"
+        >
+          <MapPin className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="truncate">
+            {location || "Google Maps'te ac"}
+          </span>
+        </a>
+      ) : (
+        <p className="mt-1 leading-6">{location || "-"}</p>
+      )}
     </div>
   );
 }

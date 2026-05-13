@@ -1,6 +1,7 @@
 "use client";
 
 import { X } from "lucide-react";
+import { useEffect } from "react";
 
 import { Button } from "@/components/ui/button";
 
@@ -19,6 +20,24 @@ export function Drawer({
   onClose,
   title,
 }: DrawerProps) {
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen, onClose]);
+
   if (!isOpen) {
     return null;
   }
@@ -31,8 +50,12 @@ export function Drawer({
         onClick={onClose}
         type="button"
       />
-      <aside className="absolute right-0 top-0 flex h-full w-full max-w-xl flex-col border-l bg-white shadow-drawer">
-        <header className="flex items-start justify-between gap-4 border-b bg-muted/60 px-5 py-4">
+      <aside
+        aria-modal="true"
+        className="absolute right-0 top-0 flex h-full w-full max-w-xl flex-col border-l border-navy/10 bg-white text-navy shadow-drawer"
+        role="dialog"
+      >
+        <header className="flex items-start justify-between gap-4 border-b border-primary/15 bg-primary/5 px-5 py-4">
           <div>
             <h2 className="text-xl font-semibold">{title}</h2>
             {description ? (

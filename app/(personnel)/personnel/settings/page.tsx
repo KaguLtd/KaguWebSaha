@@ -3,7 +3,6 @@ import { changePasswordAction } from "./actions";
 
 import { LocationTestButton } from "@/components/personnel/location-fields";
 import { Button } from "@/components/ui/button";
-import Link from "next/link";
 
 export default function PersonnelSettingsPage() {
   return (
@@ -14,9 +13,6 @@ export default function PersonnelSettingsPage() {
           <p className="mt-2 text-muted-foreground">
             Sifre ve konum izinlerini buradan kontrol et.
           </p>
-          <Button asChild className="mt-4" variant="outline">
-            <Link href="/personnel">Bugunku Islere Don</Link>
-          </Button>
         </section>
 
         <section className="rounded-lg border bg-white p-5 shadow-sm">

@@ -23,6 +23,9 @@ export default async function PersonnelLayout({
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Button asChild variant="outline">
+              <Link href="/personnel">Anasayfa</Link>
+            </Button>
+            <Button asChild variant="outline">
               <Link href="/personnel/settings">Ayarlar</Link>
             </Button>
             <form action={logoutAction}>

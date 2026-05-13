@@ -47,11 +47,11 @@ export function AdminShell({
   user: User;
 }>) {
   return (
-    <div className="min-h-screen bg-muted">
-      <aside className="fixed inset-y-0 left-0 hidden w-64 border-r border-navy/80 bg-navy px-4 py-5 text-white shadow-xl md:block">
+    <div className="min-h-screen bg-muted text-navy">
+      <aside className="fixed inset-y-0 left-0 hidden w-64 border-r border-navy/10 bg-muted px-4 py-5 text-navy shadow-xl md:block">
         <Link className="block px-2" href="/admin">
           <span className="text-lg font-semibold">Kagu Saha</span>
-          <span className="mt-1 block text-sm text-white/60">
+          <span className="mt-1 block text-sm text-muted-foreground">
             Yonetici Paneli
           </span>
         </Link>
@@ -62,7 +62,7 @@ export function AdminShell({
 
             return (
               <Link
-                className="flex items-center gap-3 rounded-md border border-transparent px-3 py-2 text-sm font-medium text-white/72 transition hover:border-white/15 hover:bg-white/10 hover:text-white"
+                className="flex items-center gap-3 rounded-md border border-transparent px-3 py-2 text-sm font-medium text-navy transition hover:border-primary/20 hover:bg-primary/10 hover:text-primary"
                 href={item.href}
                 key={item.href}
               >
@@ -87,13 +87,13 @@ export function AdminShell({
               </Button>
             </form>
           </div>
-          <nav className="flex gap-2 overflow-x-auto border-t bg-navy px-6 py-3 md:hidden">
+          <nav className="flex gap-2 overflow-x-auto border-t bg-muted px-6 py-3 md:hidden">
             {navItems.map((item) => {
               const Icon = item.icon;
 
               return (
                 <Link
-                  className="inline-flex shrink-0 items-center gap-2 rounded-md border border-white/15 px-3 py-2 text-sm font-medium text-white/80 transition hover:bg-white/10 hover:text-white"
+                  className="inline-flex shrink-0 items-center gap-2 rounded-md border border-navy/10 px-3 py-2 text-sm font-medium text-navy transition hover:border-primary/20 hover:bg-primary/10 hover:text-primary"
                   href={item.href}
                   key={item.href}
                 >

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import {
   createDailyTaskAction,
+  removeDailyTaskAction,
   updateDailyTaskAction,
 } from "@/app/(admin)/admin/schedule/actions";
 import { StatusBadge } from "@/components/admin/status-badge";
@@ -118,14 +119,14 @@ export function ScheduleDrawerCalendar({
           ))}
         </div>
 
-        <div className="grid grid-cols-7">
+        <div className="grid grid-cols-7 bg-white text-navy">
           {days.map((day) => {
             const dayTasks = tasksByDate.get(day.date) ?? [];
 
             return (
               <div
                 className={`min-h-32 cursor-pointer border-b border-r p-2 transition hover:bg-primary/5 ${
-                  day.isCurrentMonth ? "bg-white" : "bg-slate-50 text-muted-foreground"
+                  day.isCurrentMonth ? "bg-white" : "bg-navy/5 text-muted-foreground"
                 }`}
                 key={day.date}
                 onClick={() => setDrawer({ date: day.date, mode: "create" })}
@@ -183,7 +184,7 @@ export function ScheduleDrawerCalendar({
               submit(formData, createDailyTaskAction, "Gunluk gorev kaydedildi.")
             }
             personnel={getAvailablePersonnel(drawer.date, personnel, tasks)}
-            projects={projects}
+            projects={getAvailableProjects(drawer.date, projects, tasks)}
           />
         ) : null}
 
@@ -192,6 +193,9 @@ export function ScheduleDrawerCalendar({
             isPending={isPending}
             onSubmit={(formData) =>
               submit(formData, updateDailyTaskAction, "Gunluk gorev guncellendi.")
+            }
+            onRemove={(formData) =>
+              submit(formData, removeDailyTaskAction, "Gunluk gorev gunden kaldirildi.")
             }
             personnel={personnel}
             task={selectedTask}
@@ -228,6 +232,11 @@ function CreateTaskForm({
       <TextArea label="O gune ait yonetici notu" name="managerNote" rows={4} />
       <FileInput label="O gune ait dosya" />
       <AssigneeFields personnel={personnel} selectedIds={new Set()} />
+      {projects.length === 0 ? (
+        <p className="rounded-md border border-primary/15 bg-primary/5 px-3 py-2 text-sm text-muted-foreground">
+          Bu gune eklenebilecek aktif proje kalmadi.
+        </p>
+      ) : null}
       <Button disabled={isPending || projects.length === 0} type="submit">
         {isPending ? "Kaydediliyor..." : "Kaydet"}
       </Button>
@@ -237,11 +246,13 @@ function CreateTaskForm({
 
 function EditTaskForm({
   isPending,
+  onRemove,
   onSubmit,
   personnel,
   task,
 }: {
   isPending: boolean;
+  onRemove: (formData: FormData) => void;
   onSubmit: (formData: FormData) => void;
   personnel: SchedulePerson[];
   task: ScheduleTask;
@@ -258,7 +269,7 @@ function EditTaskForm({
       }}
     >
       <input name="taskId" type="hidden" value={task.id} />
-      <div className="rounded-md border bg-muted/80 p-3 shadow-sm">
+      <div className="rounded-md border border-primary/15 bg-primary/5 p-3 shadow-sm">
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="font-medium">{task.projectName}</p>
@@ -282,9 +293,29 @@ function EditTaskForm({
         personnel={personnel}
         selectedIds={selectedIds}
       />
-      <Button disabled={isPending} type="submit">
-        {isPending ? "Kaydediliyor..." : "Kaydet"}
-      </Button>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <Button disabled={isPending} type="submit">
+          {isPending ? "Kaydediliyor..." : "Kaydet"}
+        </Button>
+        {task.status === "PLANNED" ? (
+          <Button
+            disabled={isPending}
+            onClick={() => {
+              if (!window.confirm("Bu gorevi gunden kaldirmak istiyor musunuz?")) {
+                return;
+              }
+
+              const formData = new FormData();
+              formData.set("taskId", task.id);
+              onRemove(formData);
+            }}
+            type="button"
+            variant="outline"
+          >
+            Bu gorevi gunden kaldir
+          </Button>
+        ) : null}
+      </div>
     </form>
   );
 }
@@ -292,11 +323,11 @@ function EditTaskForm({
 function ProjectSelect({ projects }: { projects: ScheduleProject[] }) {
   return (
     <div className="flex flex-col gap-2">
-      <label className="text-sm font-medium" htmlFor="projectId">
+      <label className="text-sm font-medium text-navy" htmlFor="projectId">
         Proje
       </label>
       <select
-        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary"
+        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-navy shadow-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary"
         disabled={projects.length === 0}
         id="projectId"
         name="projectId"
@@ -323,8 +354,8 @@ function AssigneeFields({
   selectedIds: Set<string>;
 }) {
   return (
-    <fieldset className="flex flex-col gap-3 rounded-md border bg-white p-3 shadow-sm">
-      <legend className="px-1 text-sm font-medium">Personel</legend>
+    <fieldset className="flex flex-col gap-3 rounded-md border border-navy/10 bg-white p-3 text-navy shadow-sm">
+      <legend className="px-1 text-sm font-medium text-navy">Personel</legend>
       {disabled ? (
         <p className="text-sm text-muted-foreground">
           Gorev sahada veya tamamlanmis oldugu icin personel degistirilemez.
@@ -354,11 +385,11 @@ function AssigneeFields({
 function FileInput({ label }: { label: string }) {
   return (
     <div className="flex flex-col gap-2">
-      <label className="text-sm font-medium" htmlFor="files">
+      <label className="text-sm font-medium text-navy" htmlFor="files">
         {label}
       </label>
       <input
-        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm file:mr-3 file:rounded-md file:border file:border-primary/20 file:bg-primary/10 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary"
+        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-navy shadow-sm file:mr-3 file:rounded-md file:border file:border-primary/20 file:bg-primary/10 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary"
         id="files"
         multiple
         name="files"
@@ -381,11 +412,11 @@ function TextArea({
 }) {
   return (
     <div className="flex flex-col gap-2">
-      <label className="text-sm font-medium" htmlFor={name}>
+      <label className="text-sm font-medium text-navy" htmlFor={name}>
         {label}
       </label>
       <textarea
-        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary"
+        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-navy shadow-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary"
         defaultValue={defaultValue}
         id={name}
         name={name}
@@ -411,6 +442,18 @@ function getAvailablePersonnel(
   );
 
   return personnel.filter((person) => !busyIds.has(person.id));
+}
+
+function getAvailableProjects(
+  date: string,
+  projects: ScheduleProject[],
+  tasks: ScheduleTask[],
+) {
+  const usedProjectIds = new Set(
+    tasks.filter((task) => task.taskDate === date).map((task) => task.projectId),
+  );
+
+  return projects.filter((project) => !usedProjectIds.has(project.id));
 }
 
 function formatDateOnly(value: string) {

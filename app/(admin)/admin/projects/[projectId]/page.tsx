@@ -52,7 +52,7 @@ export default async function ProjectDetailPage({
       : null);
 
   return (
-    <main className="p-6">
+    <main className="p-6 text-navy">
       <div className="mx-auto flex max-w-6xl flex-col gap-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
@@ -71,8 +71,10 @@ export default async function ProjectDetailPage({
         </div>
 
         <section className="grid gap-4 lg:grid-cols-[1fr_360px]">
-          <article className="rounded-lg border bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-semibold">Proje Bilgileri</h2>
+          <article className="rounded-lg border border-primary/15 bg-white p-5 shadow-card">
+            <h2 className="rounded-md bg-primary/5 px-3 py-2 text-lg font-semibold text-navy">
+              Proje Bilgileri
+            </h2>
             <dl className="mt-4 grid gap-4 text-sm md:grid-cols-2">
               <Info label="Cari / Firma" value={project.customer.name} />
               <Info
@@ -105,30 +107,34 @@ export default async function ProjectDetailPage({
             </dl>
           </article>
 
-          <article className="rounded-lg border bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-semibold">Proje Dosyalari</h2>
+          <article className="rounded-lg border border-navy/10 bg-white p-5 shadow-card">
+            <h2 className="rounded-md bg-navy/5 px-3 py-2 text-lg font-semibold text-navy">
+              Proje Dosyalari
+            </h2>
             {project.files.length === 0 ? (
               <p className="mt-4 text-sm text-muted-foreground">Dosya yok.</p>
             ) : (
               <ul className="mt-4 flex flex-col gap-3">
                 {project.files.map((file) => (
                   <li
-                    className="flex items-start justify-between gap-3 rounded-md border p-3"
+                    className="flex items-start justify-between gap-3 rounded-md border border-primary/15 p-3 transition hover:bg-primary/5"
                     key={file.id}
                   >
                     <div className="min-w-0">
-                      <a
-                        className="flex items-center gap-2 font-medium text-primary hover:underline"
-                        href={`/api/files/${file.id}`}
-                      >
+                      <div className="flex items-center gap-2 font-medium text-navy">
                         <FileText className="h-4 w-4 shrink-0" aria-hidden="true" />
                         <span className="truncate">{file.originalName}</span>
-                      </a>
+                      </div>
                       <p className="mt-1 text-xs text-muted-foreground">
                         {formatFileSize(file.sizeBytes)} ·{" "}
                         {formatDisplayDate(file.createdAt)}
                       </p>
                     </div>
+                    <Button asChild size="sm" variant="outline">
+                      <a download href={`/api/files/${file.id}`}>
+                        Indir
+                      </a>
+                    </Button>
                   </li>
                 ))}
               </ul>
@@ -136,8 +142,8 @@ export default async function ProjectDetailPage({
           </article>
         </section>
 
-        <section className="rounded-lg border bg-white p-5 shadow-sm">
-          <h2 className="text-lg font-semibold">Timeline</h2>
+        <section className="rounded-lg border border-navy/10 bg-white p-5 shadow-card">
+          <h2 className="rounded-md bg-primary/5 px-3 py-2 text-lg font-semibold text-navy">Timeline</h2>
           {groupedTimeline.length === 0 ? (
             <p className="mt-4 text-sm text-muted-foreground">
               Timeline kaydi yok.
@@ -151,29 +157,42 @@ export default async function ProjectDetailPage({
                   </h3>
                   <ol className="mt-3 flex flex-col gap-3">
                     {group.events.map((event) => (
-                      <li className="rounded-md border p-4" key={event.id}>
-                        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                          <p className="font-medium">{event.title}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {formatDisplayTime(event.createdAt)}
-                          </p>
+                      <li className="rounded-md border border-navy/10 p-4 transition hover:bg-primary/5" key={event.id}>
+                        <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <p className="text-xs font-semibold uppercase text-primary">{event.title}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {event.user?.fullName || "Sistem"} tarafindan yapildi
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <span className="uppercase">{event.eventType}</span>
+                            <span>{formatDisplayTime(event.createdAt)}</span>
+                          </div>
                         </div>
-                        <p className="mt-1 text-sm text-muted-foreground">
+                        <p className="hidden">
                           {event.user?.fullName || "Sistem"} · {event.eventType}
                         </p>
-                        {event.description ? (
-                          <p className="mt-3 text-sm leading-6">
+                        {event.description && event.description !== event.file?.originalName ? (
+                          <p className="mt-3 rounded-md bg-white px-3 py-2 text-base leading-7 text-navy">
                             {event.description}
+                          </p>
+                        ) : !event.file ? (
+                          <p className="mt-3 rounded-md bg-white px-3 py-2 text-sm leading-6 text-muted-foreground">
+                            Not girilmedi.
                           </p>
                         ) : null}
                         {event.file ? (
-                          <a
-                            className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline"
-                            href={`/api/files/${event.file.id}`}
-                          >
-                            <FileText className="h-4 w-4" aria-hidden="true" />
-                            {event.file.originalName}
-                          </a>
+                          <div className="mt-3 flex items-center justify-between gap-3 rounded-md bg-white px-3 py-2">
+                            <span className="min-w-0 truncate text-sm font-medium text-navy">
+                              {event.file.originalName}
+                            </span>
+                            <Button asChild size="sm" variant="outline">
+                              <a download href={`/api/files/${event.file.id}`}>
+                                Indir
+                              </a>
+                            </Button>
+                          </div>
                         ) : null}
                       </li>
                     ))}

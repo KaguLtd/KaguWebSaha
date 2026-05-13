@@ -1,12 +1,15 @@
 "use client";
 
-import { BriefcaseBusiness, Building2, PencilLine } from "lucide-react";
+import { BriefcaseBusiness, Building2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import {
+  archiveProjectAction,
   createCustomerAction,
   createProjectAction,
+  deleteProjectAction,
+  restoreProjectAction,
   updateProjectAction,
 } from "@/app/(admin)/admin/projects/new/actions";
 import { Button } from "@/components/ui/button";
@@ -22,6 +25,7 @@ export type ProjectDrawerProject = {
   description: string;
   googleMapsUrl: string;
   id: string;
+  isActive: boolean;
   location: string;
   name: string;
 };
@@ -35,6 +39,7 @@ type ProjectDrawersProps = {
 
 export function ProjectDrawers({ customers, projects }: ProjectDrawersProps) {
   const [mode, setMode] = useState<DrawerMode>(null);
+  const [projectFilter, setProjectFilter] = useState<"active" | "archived">("active");
   const [isPending, setIsPending] = useState(false);
   const [message, setMessage] = useState("");
   const [selectedProjectId, setSelectedProjectId] = useState(projects[0]?.id ?? "");
@@ -42,6 +47,9 @@ export function ProjectDrawers({ customers, projects }: ProjectDrawersProps) {
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedProjectId),
     [projects, selectedProjectId],
+  );
+  const filteredProjects = projects.filter((project) =>
+    projectFilter === "active" ? project.isActive : !project.isActive,
   );
 
   async function submit(
@@ -55,6 +63,9 @@ export function ProjectDrawers({ customers, projects }: ProjectDrawersProps) {
     try {
       await action(formData);
       setMode(null);
+      if (action === deleteProjectAction) {
+        setSelectedProjectId(projects.find((project) => project.id !== selectedProjectId)?.id ?? "");
+      }
       setMessage(successMessage);
       router.refresh();
     } finally {
@@ -64,8 +75,8 @@ export function ProjectDrawers({ customers, projects }: ProjectDrawersProps) {
 
   return (
     <>
-      <section className="rounded-lg border bg-white p-5 shadow-card">
-        <div className="grid gap-3 sm:grid-cols-3">
+      <section className="rounded-lg border border-primary/15 bg-white p-5 text-navy shadow-card">
+        <div className="mx-auto grid max-w-2xl gap-3 sm:grid-cols-2">
           <Button className="h-16 justify-start px-5 text-base" onClick={() => setMode("customer")}>
             <Building2 className="h-5 w-5" aria-hidden="true" />
             Cari Ac
@@ -78,15 +89,6 @@ export function ProjectDrawers({ customers, projects }: ProjectDrawersProps) {
             <BriefcaseBusiness className="h-5 w-5" aria-hidden="true" />
             Proje Ac
           </Button>
-          <Button
-            className="h-16 justify-start px-5 text-base"
-            disabled={projects.length === 0}
-            onClick={() => setMode("edit")}
-            variant="outline"
-          >
-            <PencilLine className="h-5 w-5" aria-hidden="true" />
-            Proje Duzenle
-          </Button>
         </div>
         {message ? (
           <p className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
@@ -95,20 +97,46 @@ export function ProjectDrawers({ customers, projects }: ProjectDrawersProps) {
         ) : null}
       </section>
 
-      <section className="rounded-lg border bg-white shadow-card">
-        <div className="border-b bg-muted/50 p-5">
-          <h2 className="text-lg font-semibold text-navy">Projeler</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Mevcut proje kayitlari hizli kontrol icin listelenir.
-          </p>
+      <section className="rounded-lg border border-navy/10 bg-white text-navy shadow-card">
+        <div className="border-b border-primary/15 bg-primary/5 p-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-navy">Projeler</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Mevcut proje kayitlari hizli kontrol icin listelenir.
+              </p>
+            </div>
+            <div className="inline-flex rounded-md border border-navy/10 bg-white p-1">
+              <button
+                className={`rounded px-3 py-1.5 text-sm font-medium transition ${
+                  projectFilter === "active" ? "bg-primary/10 text-primary" : "text-navy hover:bg-primary/5"
+                }`}
+                onClick={() => setProjectFilter("active")}
+                type="button"
+              >
+                Aktif
+              </button>
+              <button
+                className={`rounded px-3 py-1.5 text-sm font-medium transition ${
+                  projectFilter === "archived" ? "bg-primary/10 text-primary" : "text-navy hover:bg-primary/5"
+                }`}
+                onClick={() => setProjectFilter("archived")}
+                type="button"
+              >
+                Arsiv
+              </button>
+            </div>
+          </div>
         </div>
         <div className="divide-y">
-          {projects.length === 0 ? (
+          {filteredProjects.length === 0 ? (
             <p className="p-6 text-sm text-muted-foreground">Henuz proje yok.</p>
           ) : (
-            projects.map((project) => (
+            filteredProjects.map((project) => (
               <div
-                className="flex items-start justify-between gap-4 border-l-2 border-transparent p-4 transition hover:border-primary hover:bg-primary/5"
+                className={`flex items-start justify-between gap-4 border-l-2 border-transparent p-4 transition hover:border-primary hover:bg-primary/5 ${
+                  project.isActive ? "" : "opacity-55"
+                }`}
                 key={project.id}
               >
                 <div>
@@ -180,7 +208,6 @@ export function ProjectDrawers({ customers, projects }: ProjectDrawersProps) {
           <Field label="Proje Ismi" name="name" required />
           <TextArea label="Proje Aciklamasi" name="description" rows={5} />
           <Field label="Konum / Google Maps Linki" name="location" />
-          <Field label="Google Maps Linki" name="googleMapsUrl" type="url" />
           <FileInput label="Dosyalar" />
           <Button disabled={isPending || customers.length === 0} type="submit">
             {isPending ? "Kaydediliyor..." : "Kaydet"}
@@ -233,21 +260,54 @@ export function ProjectDrawers({ customers, projects }: ProjectDrawersProps) {
             rows={5}
           />
           <Field
-            defaultValue={selectedProject?.location}
+            defaultValue={selectedProject?.googleMapsUrl || selectedProject?.location}
             label="Konum / Google Maps Linki"
             name="location"
-          />
-          <Field
-            defaultValue={selectedProject?.googleMapsUrl}
-            label="Google Maps Linki"
-            name="googleMapsUrl"
-            type="url"
           />
           <FileInput label="Yeni Dosyalar" />
           <Button disabled={isPending || !selectedProject} type="submit">
             {isPending ? "Kaydediliyor..." : "Kaydet"}
           </Button>
         </form>
+        {selectedProject ? (
+          <div className="mt-6 flex flex-col gap-3 border-t border-navy/10 pt-5">
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                submit(
+                  new FormData(event.currentTarget),
+                  selectedProject.isActive ? archiveProjectAction : restoreProjectAction,
+                  selectedProject.isActive ? "Proje arsivlendi." : "Proje aktif edildi.",
+                );
+              }}
+            >
+              <input name="projectId" type="hidden" value={selectedProject.id} />
+              <Button disabled={isPending} type="submit" variant="outline">
+                {selectedProject.isActive ? "Projeyi arsivle" : "Projeyi aktif et"}
+              </Button>
+            </form>
+            <form
+              className="rounded-md border border-red-200 bg-red-50 p-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!window.confirm("Bu proje database'den tamamen silinecek. Devam edilsin mi?")) {
+                  return;
+                }
+                submit(
+                  new FormData(event.currentTarget),
+                  deleteProjectAction,
+                  "Proje tamamen silindi.",
+                );
+              }}
+            >
+              <input name="projectId" type="hidden" value={selectedProject.id} />
+              <Field label="Silmek icin giris parolaniz" name="password" required type="password" />
+              <Button className="mt-3" disabled={isPending} type="submit" variant="destructive">
+                Projeyi sil
+              </Button>
+            </form>
+          </div>
+        ) : null}
       </Drawer>
     </>
   );
@@ -256,11 +316,11 @@ export function ProjectDrawers({ customers, projects }: ProjectDrawersProps) {
 function CustomerSelect({ customers }: { customers: ProjectDrawerCustomer[] }) {
   return (
     <div className="flex flex-col gap-2">
-      <label className="text-sm font-medium" htmlFor="customerId">
+      <label className="text-sm font-medium text-navy" htmlFor="customerId">
         Bagli Cari
       </label>
       <select
-        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary"
+        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-navy shadow-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary"
         disabled={customers.length === 0}
         id="customerId"
         name="customerId"
@@ -288,15 +348,15 @@ function Field({
   label: string;
   name: string;
   required?: boolean;
-  type?: "text" | "url";
+  type?: "password" | "text" | "url";
 }) {
   return (
     <div className="flex flex-col gap-2">
-      <label className="text-sm font-medium" htmlFor={name}>
+      <label className="text-sm font-medium text-navy" htmlFor={name}>
         {label}
       </label>
       <input
-        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary"
+        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-navy shadow-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary"
         defaultValue={defaultValue}
         id={name}
         name={name}
@@ -310,11 +370,11 @@ function Field({
 function FileInput({ label }: { label: string }) {
   return (
     <div className="flex flex-col gap-2">
-      <label className="text-sm font-medium" htmlFor="files">
+      <label className="text-sm font-medium text-navy" htmlFor="files">
         {label}
       </label>
       <input
-        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm file:mr-3 file:rounded-md file:border file:border-primary/20 file:bg-primary/10 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary"
+        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-navy shadow-sm file:mr-3 file:rounded-md file:border file:border-primary/20 file:bg-primary/10 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary"
         id="files"
         multiple
         name="files"
@@ -337,11 +397,11 @@ function TextArea({
 }) {
   return (
     <div className="flex flex-col gap-2">
-      <label className="text-sm font-medium" htmlFor={name}>
+      <label className="text-sm font-medium text-navy" htmlFor={name}>
         {label}
       </label>
       <textarea
-        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary"
+        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-navy shadow-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary"
         defaultValue={defaultValue}
         id={name}
         name={name}

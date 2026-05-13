@@ -42,6 +42,17 @@ export async function createDailyTaskAction(formData: FormData) {
     throw new Error("Proje bulunamadi.");
   }
 
+  const existingProjectTask = await prisma.dailyTask.findFirst({
+    where: {
+      projectId,
+      taskDate,
+    },
+  });
+
+  if (existingProjectTask) {
+    throw new Error("Bu proje secilen gune zaten eklenmis.");
+  }
+
   const conflictingAssignee = await prisma.dailyTaskAssignee.findFirst({
     where: {
       userId: {
@@ -299,6 +310,55 @@ export async function updateDailyTaskAction(formData: FormData) {
       },
     });
   }
+
+  revalidatePath("/admin");
+  revalidatePath("/admin/schedule");
+  revalidatePath(`/admin/schedule/tasks/${task.id}`);
+  revalidatePath(`/admin/projects/${task.projectId}`);
+}
+
+export async function removeDailyTaskAction(formData: FormData) {
+  const user = await requireRole("ADMIN");
+  const taskId = readRequiredText(formData, "taskId");
+
+  const task = await prisma.dailyTask.findUnique({
+    where: {
+      id: taskId,
+    },
+    select: {
+      id: true,
+      projectId: true,
+      status: true,
+      taskDate: true,
+      title: true,
+    },
+  });
+
+  if (!task) {
+    throw new Error("Gorev bulunamadi.");
+  }
+
+  if (task.status !== "PLANNED") {
+    throw new Error("Sahadaki veya tamamlanmis gorevler gunden kaldirilamaz.");
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.dailyTask.delete({
+      where: {
+        id: task.id,
+      },
+    });
+
+    await tx.projectTimelineEvent.create({
+      data: {
+        projectId: task.projectId,
+        userId: user.id,
+        eventType: "TASK_UPDATED",
+        title: "Gunluk gorev gunden kaldirildi",
+        description: `${task.title} - ${toDateInputValueForTimeline(task.taskDate)}`,
+      },
+    });
+  });
 
   revalidatePath("/admin");
   revalidatePath("/admin/schedule");

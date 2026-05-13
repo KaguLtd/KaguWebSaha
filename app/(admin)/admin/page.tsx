@@ -48,7 +48,7 @@ export default function AdminPage() {
   });
 
   return (
-    <main className="p-6">
+    <main className="p-6 text-navy">
       <div className="mx-auto max-w-6xl">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -77,7 +77,7 @@ async function TaskTable({
 
   if (tasks.length === 0) {
     return (
-      <section className="mt-8 rounded-lg border bg-white p-8 text-center shadow-card">
+      <section className="mt-8 rounded-lg border border-primary/15 bg-white p-8 text-center shadow-card">
         <h2 className="text-lg font-semibold">Planlanmis is yok</h2>
         <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted-foreground">
           Bugun veya gelecek tarihler icin henuz saha gorevi olusturulmamis.
@@ -88,7 +88,7 @@ async function TaskTable({
   }
 
   return (
-    <section className="mt-8 overflow-hidden rounded-lg border bg-white shadow-card">
+    <section className="mt-8 overflow-hidden rounded-lg border border-navy/10 bg-white shadow-card">
       <div className="overflow-x-auto">
         <table className="w-full min-w-[760px] border-collapse text-left text-sm">
           <thead className="bg-navy text-xs uppercase text-white/75">
@@ -100,7 +100,7 @@ async function TaskTable({
               <th className="px-4 py-3 font-semibold">Durum</th>
             </tr>
           </thead>
-          <tbody className="divide-y">
+          <tbody className="divide-y text-navy">
             {tasks.map((task) => (
               <tr className="transition hover:bg-primary/5" key={task.id}>
                 <td className="whitespace-nowrap px-4 py-4 font-medium text-primary">

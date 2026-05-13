@@ -97,7 +97,7 @@ export default async function ScheduleTaskPage({
   }).toString()}`;
 
   return (
-    <main className="p-6">
+    <main className="p-6 text-navy">
       <div className="mx-auto max-w-3xl">
         <Link
           className="text-sm font-medium text-muted-foreground hover:text-foreground"
@@ -106,7 +106,7 @@ export default async function ScheduleTaskPage({
           Takvime don
         </Link>
 
-        <section className="mt-4 rounded-lg border bg-white p-5 shadow-sm">
+        <section className="mt-4 rounded-lg border border-primary/15 bg-white p-5 shadow-card">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <h1 className="text-2xl font-semibold">{task.project.name}</h1>
@@ -128,7 +128,7 @@ export default async function ScheduleTaskPage({
                 Yonetici notu
               </label>
               <textarea
-                className="w-full rounded-md border bg-white px-3 py-2 text-sm outline-none transition focus:ring-2 focus:ring-primary"
+                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-navy outline-none transition focus:ring-2 focus:ring-primary"
                 defaultValue={task.managerNote ?? ""}
                 id="managerNote"
                 name="managerNote"
@@ -141,14 +141,14 @@ export default async function ScheduleTaskPage({
                 Timeline'a yeni not ekle
               </label>
               <textarea
-                className="w-full rounded-md border bg-white px-3 py-2 text-sm outline-none transition focus:ring-2 focus:ring-primary"
+                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-navy outline-none transition focus:ring-2 focus:ring-primary"
                 id="timelineNote"
                 name="timelineNote"
                 rows={3}
               />
             </div>
 
-            <fieldset className="flex flex-col gap-3 rounded-md border p-3">
+            <fieldset className="flex flex-col gap-3 rounded-md border border-navy/10 bg-primary/5 p-3">
               <legend className="px-1 text-sm font-medium">
                 Atanan personeller
               </legend>
@@ -188,7 +188,7 @@ export default async function ScheduleTaskPage({
                 Dosya ekle
               </label>
               <input
-                className="w-full rounded-md border bg-white px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-sm file:font-medium"
+                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-navy file:mr-3 file:rounded-md file:border file:border-primary/20 file:bg-primary/10 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary"
                 id="files"
                 multiple
                 name="files"

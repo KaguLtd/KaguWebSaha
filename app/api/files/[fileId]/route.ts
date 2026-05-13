@@ -68,7 +68,7 @@ export async function GET(
     headers: {
       "Content-Type": file.mimeType,
       "Content-Length": String(bytes.byteLength),
-      "Content-Disposition": `inline; filename*=UTF-8''${encodedFileName}`,
+      "Content-Disposition": `attachment; filename*=UTF-8''${encodedFileName}`,
     },
   });
 }

@@ -17,8 +17,10 @@ export default async function ProjectsPage({
   const params = await searchParams;
   const query = String(params?.q ?? "").trim();
   const projects = await prisma.project.findMany({
-    where: query
-      ? {
+    where: {
+      isActive: true,
+      ...(query
+        ? {
           OR: [
             {
               name: {
@@ -36,7 +38,8 @@ export default async function ProjectsPage({
             },
           ],
         }
-      : undefined,
+        : {}),
+    },
     include: {
       customer: true,
       _count: {
@@ -52,7 +55,7 @@ export default async function ProjectsPage({
   });
 
   return (
-    <main className="p-6">
+    <main className="p-6 text-navy">
       <div className="mx-auto max-w-6xl">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -86,16 +89,16 @@ export default async function ProjectsPage({
         </form>
 
         {projects.length === 0 ? (
-          <section className="mt-8 rounded-lg border bg-white p-8 text-center shadow-card">
+          <section className="mt-8 rounded-lg border border-primary/15 bg-white p-8 text-center shadow-card">
             <h2 className="text-lg font-semibold">Proje bulunamadi</h2>
             <p className="mt-2 text-sm text-muted-foreground">
               Arama kriterini degistir veya yeni proje olustur.
             </p>
           </section>
         ) : (
-          <section className="mt-8 overflow-hidden rounded-lg border bg-white shadow-card">
+          <section className="mt-8 overflow-hidden rounded-lg border border-navy/10 bg-white shadow-card">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[760px] border-collapse text-left text-sm">
+              <table className="w-full min-w-[860px] border-collapse text-left text-sm">
                 <thead className="bg-navy text-xs uppercase text-white/75">
                   <tr>
                     <th className="px-4 py-3 font-semibold">Proje</th>
@@ -103,23 +106,14 @@ export default async function ProjectsPage({
                     <th className="px-4 py-3 font-semibold">Acilis Tarihi</th>
                     <th className="px-4 py-3 font-semibold">Dosya</th>
                     <th className="px-4 py-3 font-semibold">Timeline</th>
+                    <th className="px-4 py-3 font-semibold">Islem</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y">
+                <tbody className="divide-y text-navy">
                   {projects.map((project) => (
                     <tr className="transition hover:bg-primary/5" key={project.id}>
                       <td className="px-4 py-4">
-                        <Link
-                          className="font-medium text-primary hover:underline"
-                          href={`/admin/projects/${project.id}`}
-                        >
-                          {project.name}
-                        </Link>
-                        {project.location ? (
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {project.location}
-                          </div>
-                        ) : null}
+                        <p className="font-medium text-navy">{project.name}</p>
                       </td>
                       <td className="px-4 py-4">{project.customer.name}</td>
                       <td className="whitespace-nowrap px-4 py-4">
@@ -128,6 +122,13 @@ export default async function ProjectsPage({
                       <td className="px-4 py-4">{project._count.files}</td>
                       <td className="px-4 py-4">
                         {project._count.timelineEvents} kayit
+                      </td>
+                      <td className="px-4 py-4">
+                        <Button asChild size="sm" variant="outline">
+                          <Link href={`/admin/projects/${project.id}`}>
+                            Gecmisi Incele
+                          </Link>
+                        </Button>
                       </td>
                     </tr>
                   ))}

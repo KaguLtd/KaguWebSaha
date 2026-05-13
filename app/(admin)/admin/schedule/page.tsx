@@ -26,13 +26,9 @@ export default async function SchedulePage({
   const today = getTodayDateOnly();
   const selectedDate = parseDateOnly(params?.date) ?? today;
   const monthDate = parseDateOnly(`${params?.month ?? ""}-01`) ?? selectedDate;
-  const monthStart = new Date(
-    Date.UTC(monthDate.getUTCFullYear(), monthDate.getUTCMonth(), 1),
-  );
-  const monthEnd = new Date(
-    Date.UTC(monthDate.getUTCFullYear(), monthDate.getUTCMonth() + 1, 0),
-  );
   const calendarDays = getMonthCalendarDays(monthDate);
+  const monthStart = calendarDays[0];
+  const monthEnd = calendarDays[calendarDays.length - 1];
   const previousMonth = toDateInputValue(addMonths(monthDate, -1)).slice(0, 7);
   const nextMonth = toDateInputValue(addMonths(monthDate, 1)).slice(0, 7);
 
@@ -81,10 +77,10 @@ export default async function SchedulePage({
   ]);
 
   return (
-    <main className="p-6">
+    <main className="p-6 text-navy">
       <div className="mx-auto max-w-7xl">
-        <section className="rounded-lg border bg-white shadow-card">
-          <div className="flex flex-col gap-4 border-b bg-white p-5 sm:flex-row sm:items-center sm:justify-between">
+        <section className="rounded-lg border border-primary/15 bg-white shadow-card">
+          <div className="flex flex-col gap-4 border-b border-primary/15 bg-primary/5 p-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h1 className="text-2xl font-semibold text-navy">Gunluk Programlama</h1>
               <p className="mt-1 text-sm text-muted-foreground">
