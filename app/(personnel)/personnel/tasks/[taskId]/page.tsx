@@ -8,7 +8,11 @@ import {
   OfflineLeaveForm,
 } from "@/components/personnel/offline-task-forms";
 import { Button } from "@/components/ui/button";
-import { formatDisplayDate, formatDisplayTime } from "@/lib/dates/format";
+import {
+  formatDisplayDate,
+  formatDisplayDateOnly,
+  formatDisplayTime,
+} from "@/lib/dates/format";
 import { getTodayDateOnly } from "@/lib/dates/today";
 import { requireRole } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/prisma";
@@ -63,9 +67,10 @@ export default async function PersonnelTaskDetailPage({
   }
 
   const mapsUrl =
-    task.project.latitude && task.project.longitude
+    task.project.googleMapsUrl ||
+    (task.project.latitude && task.project.longitude
       ? `https://www.google.com/maps?q=${task.project.latitude},${task.project.longitude}`
-      : task.project.googleMapsUrl;
+      : null);
 
   return (
     <main className="p-6">
@@ -145,7 +150,7 @@ export default async function PersonnelTaskDetailPage({
         <section className="rounded-lg border bg-white p-5 shadow-sm">
           <h2 className="text-lg font-semibold">Proje Bilgileri</h2>
           <div className="mt-4 flex flex-col gap-3 text-sm">
-            <Info label="Tarih" value={formatDisplayDate(task.taskDate)} />
+            <Info label="Tarih" value={formatDisplayDateOnly(task.taskDate)} />
             <Info label="Konum" value={task.project.location || "-"} />
             {mapsUrl ? (
               <a

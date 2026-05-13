@@ -9,7 +9,7 @@ import {
   syncOfflineItems,
   type OfflineItemType,
 } from "@/lib/offline/queue";
-import { Button } from "@/components/ui/button";
+import { createClientId } from "@/lib/offline/client-id";
 
 type SyncState = {
   pending: number;
@@ -94,7 +94,7 @@ async function submitOrQueue(
     return "queued";
   }
 
-  formData.set("clientItemId", crypto.randomUUID());
+  formData.set("clientItemId", createClientId());
   formData.set("type", type);
 
   const response = await fetch("/api/offline/sync", {
@@ -128,23 +128,34 @@ export function OfflineArriveForm({
 }>) {
   const router = useRouter();
   const { state, refreshPending, setState } = useOfflineSync();
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const result = await submitOrQueue("ARRIVED_SITE", event.currentTarget, (message) =>
-      setState((current) => ({ ...current, message })),
-    );
-    await refreshPending();
+    if (isSubmitting) {
+      return;
+    }
 
-    if (result === "synced") {
-      router.refresh();
+    setIsSubmitting(true);
+    setState((current) => ({ ...current, message: "Kaydediliyor..." }));
+    try {
+      const result = await submitOrQueue("ARRIVED_SITE", event.currentTarget, (message) =>
+        setState((current) => ({ ...current, message })),
+      );
+      await refreshPending();
+
+      if (result === "synced") {
+        router.refresh();
+      }
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
   return (
     <form onSubmit={handleSubmit}>
       <input name="taskId" type="hidden" value={taskId} />
-      {children}
+      <fieldset disabled={isSubmitting}>{children}</fieldset>
       <PendingNotice state={state} />
     </form>
   );
@@ -159,23 +170,34 @@ export function OfflineLeaveForm({
 }>) {
   const router = useRouter();
   const { state, refreshPending, setState } = useOfflineSync();
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const result = await submitOrQueue("LEFT_SITE", event.currentTarget, (message) =>
-      setState((current) => ({ ...current, message })),
-    );
-    await refreshPending();
+    if (isSubmitting) {
+      return;
+    }
 
-    if (result === "synced") {
-      router.refresh();
+    setIsSubmitting(true);
+    setState((current) => ({ ...current, message: "Kaydediliyor..." }));
+    try {
+      const result = await submitOrQueue("LEFT_SITE", event.currentTarget, (message) =>
+        setState((current) => ({ ...current, message })),
+      );
+      await refreshPending();
+
+      if (result === "synced") {
+        router.refresh();
+      }
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
   return (
     <form className="w-full text-left" onSubmit={handleSubmit}>
       <input name="taskId" type="hidden" value={taskId} />
-      {children}
+      <fieldset disabled={isSubmitting}>{children}</fieldset>
       <PendingNotice state={state} />
     </form>
   );
@@ -192,17 +214,3 @@ function PendingNotice({ state }: { state: SyncState }) {
     </div>
   );
 }
-
-export function SyncPendingButton() {
-  const { state, syncNow } = useOfflineSync();
-
-  return (
-    <div className="flex flex-col gap-2">
-      <Button onClick={syncNow} type="button" variant="outline">
-        Bekleyen kayitlari gonder
-      </Button>
-      <PendingNotice state={state} />
-    </div>
-  );
-}
-

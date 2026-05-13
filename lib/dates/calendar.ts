@@ -4,12 +4,12 @@ export function parseDateOnly(value: string | undefined) {
   }
 
   const [year, month, day] = value.split("-").map(Number);
-  const date = new Date(year, month - 1, day);
+  const date = new Date(Date.UTC(year, month - 1, day));
 
   if (
-    date.getFullYear() !== year ||
-    date.getMonth() !== month - 1 ||
-    date.getDate() !== day
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
   ) {
     return null;
   }
@@ -18,28 +18,31 @@ export function parseDateOnly(value: string | undefined) {
 }
 
 export function toDateInputValue(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
 
   return `${year}-${month}-${day}`;
 }
 
 export function getMonthCalendarDays(monthDate: Date) {
-  const firstDay = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
+  const firstDay = new Date(
+    Date.UTC(monthDate.getUTCFullYear(), monthDate.getUTCMonth(), 1),
+  );
   const start = new Date(firstDay);
-  const mondayBasedDay = (firstDay.getDay() + 6) % 7;
-  start.setDate(firstDay.getDate() - mondayBasedDay);
+  const mondayBasedDay = (firstDay.getUTCDay() + 6) % 7;
+  start.setUTCDate(firstDay.getUTCDate() - mondayBasedDay);
 
   return Array.from({ length: 42 }, (_, index) => {
     const date = new Date(start);
-    date.setDate(start.getDate() + index);
+    date.setUTCDate(start.getUTCDate() + index);
 
     return date;
   });
 }
 
 export function addMonths(date: Date, amount: number) {
-  return new Date(date.getFullYear(), date.getMonth() + amount, 1);
+  return new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + amount, 1),
+  );
 }
-

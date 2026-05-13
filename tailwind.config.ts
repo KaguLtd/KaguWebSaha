@@ -16,8 +16,14 @@ const config: Config = {
         "muted-foreground": "hsl(var(--muted-foreground))",
         primary: "hsl(var(--primary))",
         "primary-foreground": "hsl(var(--primary-foreground))",
+        navy: "hsl(var(--navy))",
+        surface: "hsl(var(--surface))",
         destructive: "hsl(var(--destructive))",
         "destructive-foreground": "hsl(var(--destructive-foreground))",
+      },
+      boxShadow: {
+        card: "0 12px 30px hsl(var(--surface-shadow) / 0.08)",
+        drawer: "-18px 0 45px hsl(var(--surface-shadow) / 0.18)",
       },
       borderRadius: {
         lg: "var(--radius)",
@@ -30,4 +36,3 @@ const config: Config = {
 };
 
 export default config;
-

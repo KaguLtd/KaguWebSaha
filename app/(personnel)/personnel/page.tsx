@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import { StatusBadge } from "@/components/admin/status-badge";
-import { formatDisplayDate } from "@/lib/dates/format";
+import { formatDisplayDateOnly } from "@/lib/dates/format";
 import { getTodayDateOnly } from "@/lib/dates/today";
 import { requireRole } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/prisma";
@@ -14,7 +14,7 @@ export default function PersonnelPage() {
       <div className="mx-auto max-w-md">
         <h1 className="text-3xl font-semibold">Bugunku Isler</h1>
         <p className="mt-2 text-muted-foreground">
-          {formatDisplayDate(getTodayDateOnly())}
+          {formatDisplayDateOnly(getTodayDateOnly())}
         </p>
 
         <TaskCards tasksPromise={tasksPromise} />

@@ -3,7 +3,8 @@ type Coordinates = {
   longitude: number;
 };
 
-const COORDINATE_PATTERN = /(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/;
+const COORDINATE_PATTERN = /^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/;
+const AT_COORDINATE_PATTERN = /@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)(?:[,/]|$)/;
 
 export function parseCoordinate(value: string) {
   const parsed = Number(value.replace(",", "."));
@@ -36,15 +37,49 @@ export function parseGoogleMapsCoordinates(url: string): Coordinates | null {
     return null;
   }
 
-  const decoded = decodeURIComponent(url);
-  const match = decoded.match(COORDINATE_PATTERN);
+  let decoded = "";
+
+  try {
+    decoded = decodeURIComponent(url);
+  } catch {
+    return null;
+  }
+
+  const atMatch = decoded.match(AT_COORDINATE_PATTERN);
+
+  if (atMatch) {
+    return toCoordinates(atMatch[1], atMatch[2]);
+  }
+
+  let parsedUrl: URL;
+
+  try {
+    parsedUrl = new URL(decoded);
+  } catch {
+    return null;
+  }
+
+  const queryCoordinates =
+    parsedUrl.searchParams.get("q") ??
+    parsedUrl.searchParams.get("query") ??
+    parsedUrl.searchParams.get("ll");
+
+  if (!queryCoordinates) {
+    return null;
+  }
+
+  const match = queryCoordinates.match(COORDINATE_PATTERN);
 
   if (!match) {
     return null;
   }
 
-  const latitude = Number(match[1]);
-  const longitude = Number(match[2]);
+  return toCoordinates(match[1], match[2]);
+}
+
+function toCoordinates(latitudeValue: string, longitudeValue: string) {
+  const latitude = Number(latitudeValue);
+  const longitude = Number(longitudeValue);
 
   if (
     !Number.isFinite(latitude) ||

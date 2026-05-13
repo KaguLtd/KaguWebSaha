@@ -2,8 +2,8 @@ import { logoutAction } from "@/app/(auth)/login/actions";
 import { changePasswordAction } from "./actions";
 
 import { LocationTestButton } from "@/components/personnel/location-fields";
-import { SyncPendingButton } from "@/components/personnel/offline-task-forms";
 import { Button } from "@/components/ui/button";
+import Link from "next/link";
 
 export default function PersonnelSettingsPage() {
   return (
@@ -14,6 +14,9 @@ export default function PersonnelSettingsPage() {
           <p className="mt-2 text-muted-foreground">
             Sifre ve konum izinlerini buradan kontrol et.
           </p>
+          <Button asChild className="mt-4" variant="outline">
+            <Link href="/personnel">Bugunku Islere Don</Link>
+          </Button>
         </section>
 
         <section className="rounded-lg border bg-white p-5 shadow-sm">
@@ -40,11 +43,8 @@ export default function PersonnelSettingsPage() {
           <h2 className="text-lg font-semibold">Offline kayitlar</h2>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
             Internet yokken olusan saha kayitlari tarayicida bekler ve baglanti
-            gelince server'a gonderilir.
+            gelince otomatik olarak server'a gonderilir.
           </p>
-          <div className="mt-4">
-            <SyncPendingButton />
-          </div>
         </section>
 
         <form action={logoutAction}>

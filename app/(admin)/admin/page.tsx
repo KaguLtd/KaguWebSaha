@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 
 import { StatusBadge } from "@/components/admin/status-badge";
-import { formatDisplayDate } from "@/lib/dates/format";
+import { formatDisplayDateOnly } from "@/lib/dates/format";
 import { getTodayDateOnly } from "@/lib/dates/today";
 import { prisma } from "@/lib/db/prisma";
 
@@ -52,13 +52,13 @@ export default function AdminPage() {
       <div className="mx-auto max-w-6xl">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h1 className="text-3xl font-semibold">Yonetici Dashboard</h1>
+            <h1 className="text-3xl font-semibold text-navy">Yonetici Dashboard</h1>
             <p className="mt-2 text-muted-foreground">
               Bugunun ve gelecek gunlerin planlanmis saha isleri.
             </p>
           </div>
           <p className="text-sm text-muted-foreground">
-            Bugun: {formatDisplayDate(getTodayDateOnly())}
+            Bugun: {formatDisplayDateOnly(getTodayDateOnly())}
           </p>
         </div>
 
@@ -77,7 +77,7 @@ async function TaskTable({
 
   if (tasks.length === 0) {
     return (
-      <section className="mt-8 rounded-lg border bg-white p-8 text-center shadow-sm">
+      <section className="mt-8 rounded-lg border bg-white p-8 text-center shadow-card">
         <h2 className="text-lg font-semibold">Planlanmis is yok</h2>
         <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted-foreground">
           Bugun veya gelecek tarihler icin henuz saha gorevi olusturulmamis.
@@ -88,10 +88,10 @@ async function TaskTable({
   }
 
   return (
-    <section className="mt-8 overflow-hidden rounded-lg border bg-white shadow-sm">
+    <section className="mt-8 overflow-hidden rounded-lg border bg-white shadow-card">
       <div className="overflow-x-auto">
         <table className="w-full min-w-[760px] border-collapse text-left text-sm">
-          <thead className="bg-muted text-xs uppercase text-muted-foreground">
+          <thead className="bg-navy text-xs uppercase text-white/75">
             <tr>
               <th className="px-4 py-3 font-semibold">Tarih</th>
               <th className="px-4 py-3 font-semibold">Proje</th>
@@ -102,9 +102,9 @@ async function TaskTable({
           </thead>
           <tbody className="divide-y">
             {tasks.map((task) => (
-              <tr key={task.id}>
-                <td className="whitespace-nowrap px-4 py-4 font-medium">
-                  {formatDisplayDate(task.taskDate)}
+              <tr className="transition hover:bg-primary/5" key={task.id}>
+                <td className="whitespace-nowrap px-4 py-4 font-medium text-primary">
+                  {formatDisplayDateOnly(task.taskDate)}
                 </td>
                 <td className="px-4 py-4">
                   <div className="font-medium">{task.project.name}</div>

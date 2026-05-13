@@ -46,9 +46,10 @@ export default async function ProjectDetailPage({
 
   const groupedTimeline = groupTimelineByDate(project.timelineEvents);
   const mapsUrl =
-    project.latitude && project.longitude
+    project.googleMapsUrl ||
+    (project.latitude && project.longitude
       ? `https://www.google.com/maps?q=${project.latitude},${project.longitude}`
-      : project.googleMapsUrl;
+      : null);
 
   return (
     <main className="p-6">
@@ -213,4 +214,3 @@ function groupTimelineByDate<
     events: items,
   }));
 }
-

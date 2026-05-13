@@ -1,5 +1,7 @@
 "use client";
 
+import { createClientId } from "@/lib/offline/client-id";
+
 export type OfflineItemType = "ARRIVED_SITE" | "LEFT_SITE";
 
 export type OfflineQueueItem = {
@@ -68,7 +70,7 @@ export async function enqueueOfflineItem(
 ) {
   const queuedItem: OfflineQueueItem = {
     ...item,
-    id: crypto.randomUUID(),
+    id: createClientId(),
     createdAt: new Date().toISOString(),
   };
 
@@ -138,4 +140,3 @@ export async function syncOfflineItems() {
     remaining: (await listOfflineItems()).length,
   };
 }
-

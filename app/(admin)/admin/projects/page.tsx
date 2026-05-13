@@ -56,7 +56,7 @@ export default async function ProjectsPage({
       <div className="mx-auto max-w-6xl">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h1 className="text-3xl font-semibold">Projeler</h1>
+            <h1 className="text-3xl font-semibold text-navy">Projeler</h1>
             <p className="mt-2 text-muted-foreground">
               Proje dosyalarini ara ve gecmis timeline kayitlarini goruntule.
             </p>
@@ -73,7 +73,7 @@ export default async function ProjectsPage({
               className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground"
             />
             <input
-              className="w-full rounded-md border bg-white py-2 pl-9 pr-3 text-sm outline-none transition focus:ring-2 focus:ring-primary"
+              className="w-full rounded-md border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm shadow-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary"
               defaultValue={query}
               name="q"
               placeholder="Proje veya cari ara"
@@ -86,17 +86,17 @@ export default async function ProjectsPage({
         </form>
 
         {projects.length === 0 ? (
-          <section className="mt-8 rounded-lg border bg-white p-8 text-center shadow-sm">
+          <section className="mt-8 rounded-lg border bg-white p-8 text-center shadow-card">
             <h2 className="text-lg font-semibold">Proje bulunamadi</h2>
             <p className="mt-2 text-sm text-muted-foreground">
               Arama kriterini degistir veya yeni proje olustur.
             </p>
           </section>
         ) : (
-          <section className="mt-8 overflow-hidden rounded-lg border bg-white shadow-sm">
+          <section className="mt-8 overflow-hidden rounded-lg border bg-white shadow-card">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[760px] border-collapse text-left text-sm">
-                <thead className="bg-muted text-xs uppercase text-muted-foreground">
+                <thead className="bg-navy text-xs uppercase text-white/75">
                   <tr>
                     <th className="px-4 py-3 font-semibold">Proje</th>
                     <th className="px-4 py-3 font-semibold">Cari / Firma</th>
@@ -107,7 +107,7 @@ export default async function ProjectsPage({
                 </thead>
                 <tbody className="divide-y">
                   {projects.map((project) => (
-                    <tr key={project.id}>
+                    <tr className="transition hover:bg-primary/5" key={project.id}>
                       <td className="px-4 py-4">
                         <Link
                           className="font-medium text-primary hover:underline"
@@ -140,4 +140,3 @@ export default async function ProjectsPage({
     </main>
   );
 }
-

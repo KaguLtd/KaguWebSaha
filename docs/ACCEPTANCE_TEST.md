@@ -17,19 +17,19 @@ Use this checklist after a database is connected and migrations are applied.
 3. Open `/admin/users`.
 4. Create one active personnel user.
 5. Open `/admin/projects/new`.
-6. Create one customer.
-7. Create one project linked to that customer.
-8. Add a project description and one small test file.
-9. Confirm the project detail page opens.
-10. Confirm the timeline shows `Proje olusturuldu`.
-11. Confirm the uploaded file appears in project files and timeline.
+6. Click `Cari Ac`, create one customer, and confirm the drawer closes.
+7. Click `Proje Ac`, create one project linked to that customer, and confirm the drawer closes.
+8. Add a project description, Google Maps link if available, and one small test file.
+9. Click `Proje Duzenle`, update static project info, add one new file, and save.
+10. Confirm the project list refreshes.
+11. Open the project detail page and confirm the timeline shows `Proje olusturuldu`, `Proje bilgileri guncellendi`, and file events.
 12. Open `/admin/schedule`.
-13. Select today.
+13. Click today on the calendar to open the assignment drawer.
 14. Select the project.
 15. Assign the personnel user.
-16. Add a manager note and save.
-17. Confirm the task appears on the calendar and dashboard.
-18. Open the scheduled task from the selected day panel.
+16. Add a manager note and save; confirm the drawer closes.
+17. Confirm the task appears on the selected calendar day and dashboard for the same day.
+18. Click the project name on the calendar to open the edit drawer.
 19. If the task is still `PLANNED`, edit assigned personnel and save.
 20. After the task is `ON_SITE` or `COMPLETED`, confirm personnel assignment is locked and note/file additions still work.
 
@@ -74,10 +74,17 @@ Use this checklist after a database is connected and migrations are applied.
 4. Press `Sahaya Ulastim` or complete an available offline action.
 5. Confirm a pending-record message appears.
 6. Re-enable network.
-7. Open `/personnel/settings`.
-8. Press `Bekleyen kayitlari gonder` if automatic sync has not already run.
-9. Confirm pending count clears.
+7. Return to any personnel page or bring the personnel tab back to the foreground.
+8. Confirm automatic sync runs and the pending count/message clears.
+9. Open `/personnel/settings` and confirm there is a `Bugunku Islere Don` link.
 10. Login as admin and confirm the project timeline received the synced event.
+
+## Regression Notes
+
+1. Daily task dates are submitted as `YYYY-MM-DD` and should remain on that exact date in calendar, dashboard, and personnel views.
+2. Offline personnel actions should work in browsers without `crypto.randomUUID`; client IDs fall back automatically.
+3. Cari, project, and daily task create buttons should show a pending state and ignore double submit while saving.
+4. Project and schedule admin flows should open in drawers instead of always-visible side-by-side forms.
 
 ## Reset Before Real Use
 

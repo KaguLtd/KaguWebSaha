@@ -3,13 +3,16 @@
 :root {
   --background: 0 0% 100%;
   --foreground: 222 47% 11%;
-  --muted: 210 40% 96%;
-  --muted-foreground: 215 16% 47%;
-  --primary: 158 64% 28%;
+  --muted: 210 33% 97%;
+  --muted-foreground: 215 16% 42%;
+  --primary: 29 77% 43%;
   --primary-foreground: 0 0% 100%;
   --destructive: 0 72% 51%;
   --destructive-foreground: 0 0% 100%;
-  --border: 214 32% 91%;
+  --border: 214 28% 86%;
+  --navy: 214 100% 6%;
+  --surface: 0 0% 100%;
+  --surface-shadow: 214 45% 12%;
   --radius: 0.5rem;
 }
 
@@ -24,7 +27,9 @@ html {
 body {
   min-height: 100%;
   margin: 0;
-  background: hsl(var(--background));
+  background:
+    radial-gradient(circle at top left, hsl(var(--primary) / 0.08), transparent 30rem),
+    hsl(var(--background));
   color: hsl(var(--foreground));
   font-family: Arial, Helvetica, sans-serif;
 }
@@ -34,3 +39,6 @@ a {
   text-decoration: none;
 }
 
+table {
+  border-color: hsl(var(--border));
+}

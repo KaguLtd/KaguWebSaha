@@ -5,7 +5,9 @@ import { updateDailyTaskAction } from "../../actions";
 
 import { StatusBadge } from "@/components/admin/status-badge";
 import { Button } from "@/components/ui/button";
-import { formatDisplayDate } from "@/lib/dates/format";
+import { PendingSubmitButton } from "@/components/ui/pending-submit-button";
+import { toDateInputValue } from "@/lib/dates/calendar";
+import { formatDisplayDateOnly } from "@/lib/dates/format";
 import { prisma } from "@/lib/db/prisma";
 
 export const dynamic = "force-dynamic";
@@ -91,7 +93,7 @@ export default async function ScheduleTaskPage({
 
   const backHref = `/admin/schedule?${new URLSearchParams({
     ...(query?.month ? { month: query.month } : {}),
-    date: query?.date ?? task.taskDate.toISOString().slice(0, 10),
+    date: query?.date ?? toDateInputValue(task.taskDate),
   }).toString()}`;
 
   return (
@@ -109,7 +111,7 @@ export default async function ScheduleTaskPage({
             <div>
               <h1 className="text-2xl font-semibold">{task.project.name}</h1>
               <p className="mt-2 text-sm text-muted-foreground">
-                {task.project.customer.name} · {formatDisplayDate(task.taskDate)}
+                {task.project.customer.name} · {formatDisplayDateOnly(task.taskDate)}
               </p>
             </div>
             <StatusBadge status={task.status} />
@@ -195,7 +197,7 @@ export default async function ScheduleTaskPage({
             </div>
 
             <div className="flex flex-wrap gap-3">
-              <Button type="submit">Kaydet</Button>
+              <PendingSubmitButton>Kaydet</PendingSubmitButton>
               <Button asChild type="button" variant="outline">
                 <Link href={`/admin/projects/${task.projectId}`}>
                   Proje timeline'ini ac

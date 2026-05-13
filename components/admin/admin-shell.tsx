@@ -48,10 +48,10 @@ export function AdminShell({
 }>) {
   return (
     <div className="min-h-screen bg-muted">
-      <aside className="fixed inset-y-0 left-0 hidden w-64 border-r bg-white px-4 py-5 md:block">
+      <aside className="fixed inset-y-0 left-0 hidden w-64 border-r border-navy/80 bg-navy px-4 py-5 text-white shadow-xl md:block">
         <Link className="block px-2" href="/admin">
           <span className="text-lg font-semibold">Kagu Saha</span>
-          <span className="mt-1 block text-sm text-muted-foreground">
+          <span className="mt-1 block text-sm text-white/60">
             Yonetici Paneli
           </span>
         </Link>
@@ -62,7 +62,7 @@ export function AdminShell({
 
             return (
               <Link
-                className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                className="flex items-center gap-3 rounded-md border border-transparent px-3 py-2 text-sm font-medium text-white/72 transition hover:border-white/15 hover:bg-white/10 hover:text-white"
                 href={item.href}
                 key={item.href}
               >
@@ -75,11 +75,11 @@ export function AdminShell({
       </aside>
 
       <div className="md:pl-64">
-        <header className="border-b bg-white">
+        <header className="border-b bg-white shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4">
             <div>
-              <p className="text-sm text-muted-foreground">Yonetici</p>
-              <p className="font-semibold">{user.fullName}</p>
+              <p className="text-sm font-medium text-primary">Yonetici</p>
+              <p className="font-semibold text-navy">{user.fullName}</p>
             </div>
             <form action={logoutAction}>
               <Button type="submit" variant="outline">
@@ -87,13 +87,13 @@ export function AdminShell({
               </Button>
             </form>
           </div>
-          <nav className="flex gap-2 overflow-x-auto border-t px-6 py-3 md:hidden">
+          <nav className="flex gap-2 overflow-x-auto border-t bg-navy px-6 py-3 md:hidden">
             {navItems.map((item) => {
               const Icon = item.icon;
 
               return (
                 <Link
-                  className="inline-flex shrink-0 items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium text-muted-foreground"
+                  className="inline-flex shrink-0 items-center gap-2 rounded-md border border-white/15 px-3 py-2 text-sm font-medium text-white/80 transition hover:bg-white/10 hover:text-white"
                   href={item.href}
                   key={item.href}
                 >
