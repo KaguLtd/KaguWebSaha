@@ -6,6 +6,8 @@ import { saveProjectUpload } from "@/lib/files/storage";
 import { parseLatitude, parseLongitude } from "@/lib/location/google-maps";
 import { prisma } from "@/lib/db/prisma";
 
+type SavedProjectUpload = NonNullable<Awaited<ReturnType<typeof saveProjectUpload>>>;
+
 function readRequiredText(formData: FormData, name: string) {
   const value = String(formData.get(name) ?? "").trim();
 
@@ -189,6 +191,18 @@ async function syncLeaveSite(
   const durationMinutes = task.arrivedAt
     ? Math.max(0, Math.round((now.getTime() - task.arrivedAt.getTime()) / 60000))
     : null;
+  const files = formData
+    .getAll("files")
+    .filter((value): value is File => value instanceof File && value.size > 0);
+  const savedFiles: SavedProjectUpload[] = [];
+
+  for (const file of files) {
+    const savedFile = await saveProjectUpload(file, task.projectId);
+
+    if (savedFile) {
+      savedFiles.push(savedFile);
+    }
+  }
 
   await prisma.$transaction(async (tx) => {
     await tx.offlinePendingItem.upsert({
@@ -277,54 +291,43 @@ async function syncLeaveSite(
         },
       });
     }
-  });
 
-  const files = formData
-    .getAll("files")
-    .filter((value): value is File => value instanceof File && value.size > 0);
+    for (const savedFile of savedFiles) {
+      const projectFile = await tx.projectFile.create({
+        data: {
+          projectId: task.projectId,
+          dailyTaskId: task.id,
+          uploadedByUserId: userId,
+          originalName: savedFile.originalName,
+          mimeType: savedFile.mimeType,
+          sizeBytes: savedFile.sizeBytes,
+          storagePath: savedFile.storagePath,
+          note,
+        },
+      });
 
-  for (const file of files) {
-    const savedFile = await saveProjectUpload(file, task.projectId);
-
-    if (!savedFile) {
-      continue;
+      await tx.projectTimelineEvent.create({
+        data: {
+          projectId: task.projectId,
+          dailyTaskId: task.id,
+          userId,
+          eventType: "FILE_ADDED",
+          title: "Personel dosya ekledi",
+          description: savedFile.originalName,
+          fileId: projectFile.id,
+        },
+      });
     }
 
-    const projectFile = await prisma.projectFile.create({
+    await tx.offlinePendingItem.update({
+      where: {
+        clientItemId,
+      },
       data: {
-        projectId: task.projectId,
-        dailyTaskId: task.id,
-        uploadedByUserId: userId,
-        originalName: savedFile.originalName,
-        mimeType: savedFile.mimeType,
-        sizeBytes: savedFile.sizeBytes,
-        storagePath: savedFile.storagePath,
-        note,
+        status: "SYNCED",
+        syncedAt: now,
+        lastError: null,
       },
     });
-
-    await prisma.projectTimelineEvent.create({
-      data: {
-        projectId: task.projectId,
-        dailyTaskId: task.id,
-        userId,
-        eventType: "FILE_ADDED",
-        title: "Personel dosya ekledi",
-        description: savedFile.originalName,
-        fileId: projectFile.id,
-      },
-    });
-  }
-
-  await prisma.offlinePendingItem.update({
-    where: {
-      clientItemId,
-    },
-    data: {
-      status: "SYNCED",
-      syncedAt: now,
-      lastError: null,
-    },
   });
 }
-

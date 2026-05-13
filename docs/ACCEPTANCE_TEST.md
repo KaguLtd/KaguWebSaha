@@ -29,6 +29,9 @@ Use this checklist after a database is connected and migrations are applied.
 15. Assign the personnel user.
 16. Add a manager note and save.
 17. Confirm the task appears on the calendar and dashboard.
+18. Open the scheduled task from the selected day panel.
+19. If the task is still `PLANNED`, edit assigned personnel and save.
+20. After the task is `ON_SITE` or `COMPLETED`, confirm personnel assignment is locked and note/file additions still work.
 
 ## Personnel Flow
 
@@ -83,4 +86,3 @@ Use this checklist after a database is connected and migrations are applied.
 3. Re-run migrations on the clean database.
 4. Re-run `npm run admin:bootstrap` with real admin environment variables.
 5. Create real personnel users, customers, and projects.
-

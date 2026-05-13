@@ -55,10 +55,16 @@ export async function GET(
   }
 
   const absolutePath = resolveStoragePath(file.storagePath);
-  const bytes = await readFile(absolutePath);
+  let bytes: Buffer;
+
+  try {
+    bytes = await readFile(absolutePath);
+  } catch {
+    return NextResponse.json({ error: "Dosya depoda bulunamadi." }, { status: 404 });
+  }
   const encodedFileName = encodeURIComponent(path.basename(file.originalName));
 
-  return new Response(bytes, {
+  return new Response(new Uint8Array(bytes), {
     headers: {
       "Content-Type": file.mimeType,
       "Content-Length": String(bytes.byteLength),
