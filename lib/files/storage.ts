@@ -3,7 +3,7 @@ import path from "path";
 import { randomUUID } from "crypto";
 
 const DEFAULT_UPLOAD_DIR = "uploads";
-const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 
 function getUploadRoot() {
   const uploadDir = process.env.UPLOAD_DIR || DEFAULT_UPLOAD_DIR;
@@ -25,7 +25,7 @@ export async function saveProjectUpload(file: File, projectId: string) {
   }
 
   if (file.size > MAX_UPLOAD_BYTES) {
-    throw new Error("Dosya boyutu 25 MB limitini asamaz.");
+    throw new Error("Dosya boyutu 100 MB limitini asamaz.");
   }
 
   const originalName = file.name || "upload";
@@ -74,4 +74,3 @@ export function formatFileSize(sizeBytes: bigint | number) {
 
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
-

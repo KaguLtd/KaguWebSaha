@@ -61,7 +61,22 @@ export function ProjectDrawers({ customers, projects }: ProjectDrawersProps) {
     setMessage("");
 
     try {
-      await action(formData);
+      if (action === createProjectAction || action === updateProjectAction) {
+        formData.set("operation", action === createProjectAction ? "create" : "update");
+        const response = await fetch("/api/admin/projects", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => null)) as {
+            error?: string;
+          } | null;
+          throw new Error(payload?.error || "Proje kaydedilemedi.");
+        }
+      } else {
+        await action(formData);
+      }
       setMode(null);
       if (action === deleteProjectAction) {
         setSelectedProjectId(projects.find((project) => project.id !== selectedProjectId)?.id ?? "");

@@ -29,30 +29,46 @@ Use this checklist after a database is connected and migrations are applied.
 15. Assign the personnel user.
 16. Add a manager note and save; confirm the drawer closes.
 17. Confirm the task appears on the selected calendar day and dashboard for the same day.
-18. Click the project name on the calendar to open the edit drawer.
-19. If the task is still `PLANNED`, edit assigned personnel and save.
-20. After the task is `ON_SITE` or `COMPLETED`, confirm personnel assignment is locked and note/file additions still work.
+18. Create a second project or select another project for the same date.
+19. Assign the same personnel user to this second task and save.
+20. Confirm the same personnel can have two tasks on the same day.
+21. Click the project name on the calendar to open the edit drawer.
+22. If the task is still `PLANNED`, edit assigned personnel and save.
+23. After the task is `ON_SITE` or `COMPLETED`, confirm personnel assignment is locked and note/file additions still work.
 
 ## Personnel Flow
 
 1. Logout from admin.
 2. Login as the personnel user.
-3. Confirm only today's assigned task appears.
-4. Open the task.
-5. Press `Sahaya Ulastim`.
-6. Allow or deny location; both paths must continue.
-7. Confirm the task changes to `ON_SITE`.
-8. Press `Sahadan Ayrildim`.
-9. Try to submit without a note; browser validation must block it.
-10. Add a note and optional file, then submit.
-11. Confirm the task changes to `COMPLETED`.
-12. Confirm the completed task remains visible but muted on `/personnel`.
+3. Confirm only today's assigned tasks appear.
+4. Confirm both same-day tasks assigned to the personnel are visible.
+5. Open the first task.
+6. Confirm the note/file area is visible immediately on the task detail page and has the `Kaydet` button.
+7. Press `Sahaya Ulaştım`.
+8. Allow or deny location; both paths must continue.
+9. Confirm the first task changes to `ON_SITE`.
+10. Return to `/personnel` and open the second task.
+11. Press `Sahaya Ulaştım` on the second task while the first task is still `ON_SITE`.
+12. Confirm the app blocks this action because the personnel cannot have two simultaneous `ON_SITE` tasks.
+13. Return to the first task.
+14. Press `Sahadan Ayrıldım` without adding a note.
+15. Confirm the app warns that today's work note must be written before leaving the site.
+16. Add a note from the visible note/file area and press `Kaydet`.
+17. Optionally add a file from the same panel.
+18. Press `Sahadan Ayrıldım` again.
+19. Confirm the task changes to `COMPLETED`.
+20. Confirm the completed task remains visible but muted on `/personnel`.
+21. Open the second task.
+22. Press `Sahaya Ulaştım`; now it should work because the first task is no longer `ON_SITE`.
+23. Add a note from the visible note/file area and press `Kaydet`.
+24. Press `Sahadan Ayrıldım`.
+25. Confirm the second task changes to `COMPLETED`.
 
 ## Timeline Verification
 
 1. Login as admin.
 2. Open the project detail page.
-3. Confirm timeline entries exist for task creation, personnel assignment, arrival, note, leave, and file upload.
+3. Confirm timeline entries exist for task creation, personnel assignment, arrival, note saved with `Kaydet`, leave, and file upload.
 4. Confirm files can be opened by admin.
 5. Login as personnel and confirm they can open files only for today's assigned project.
 
@@ -71,13 +87,19 @@ Use this checklist after a database is connected and migrations are applied.
 1. Login as personnel.
 2. Open today's task.
 3. Disable browser network.
-4. Press `Sahaya Ulastim` or complete an available offline action.
+4. Add a note from the visible note/file area and press `Kaydet`.
 5. Confirm a pending-record message appears.
 6. Re-enable network.
 7. Return to any personnel page or bring the personnel tab back to the foreground.
-8. Confirm automatic sync runs and the pending count/message clears.
-9. Open `/personnel/settings` and confirm there is a `Bugunku Islere Don` link.
-10. Login as admin and confirm the project timeline received the synced event.
+8. Confirm automatic NOTE sync runs and the pending count/message clears.
+9. Login as admin and confirm the project timeline received the synced note.
+10. Disable browser network again.
+11. Press `Sahaya Ulaştım` or complete another available offline action.
+12. Confirm a pending-record message appears.
+13. Re-enable network.
+14. Open `/personnel/settings` and press the manual pending sync control if automatic sync has not already run.
+15. Confirm the pending count/message clears.
+16. Login as admin and confirm the project timeline received the synced event.
 
 ## Regression Notes
 
@@ -85,6 +107,8 @@ Use this checklist after a database is connected and migrations are applied.
 2. Offline personnel actions should work in browsers without `crypto.randomUUID`; client IDs fall back automatically.
 3. Cari, project, and daily task create buttons should show a pending state and ignore double submit while saving.
 4. Project and schedule admin flows should open in drawers instead of always-visible side-by-side forms.
+5. The same personnel can be assigned to two tasks on the same day, but cannot start two simultaneous `ON_SITE` tasks.
+6. `Sahadan Ayrıldım` requires a note created from the always-visible note/file area with the `Kaydet` button.
 
 ## Reset Before Real Use
 

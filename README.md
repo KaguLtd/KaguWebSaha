@@ -98,6 +98,10 @@ Expected response:
 
 See `docs/ACCEPTANCE_TEST.md` for the full manual acceptance checklist.
 
+## Go-Live
+
+After acceptance testing passes, use `docs/GO_LIVE.md` before resetting test data or entering real customer/project records.
+
 ## Product Guardrails
 
 - No accounting, stock, CRM, or external database integration.

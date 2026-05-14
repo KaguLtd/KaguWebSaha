@@ -93,7 +93,22 @@ export function ScheduleDrawerCalendar({
     setMessage("");
 
     try {
-      await action(formData);
+      if (action === createDailyTaskAction || action === updateDailyTaskAction) {
+        formData.set("operation", action === createDailyTaskAction ? "create" : "update");
+        const response = await fetch("/api/admin/daily-tasks", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => null)) as {
+            error?: string;
+          } | null;
+          throw new Error(payload?.error || "Gunluk gorev kaydedilemedi.");
+        }
+      } else {
+        await action(formData);
+      }
       setDrawer(null);
       setMessage(successMessage);
       router.refresh();

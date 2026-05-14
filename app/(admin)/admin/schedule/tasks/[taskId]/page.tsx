@@ -1,8 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { updateDailyTaskAction } from "../../actions";
-
 import { StatusBadge } from "@/components/admin/status-badge";
 import { Button } from "@/components/ui/button";
 import { PendingSubmitButton } from "@/components/ui/pending-submit-button";
@@ -118,10 +116,13 @@ export default async function ScheduleTaskPage({
           </div>
 
           <form
-            action={updateDailyTaskAction}
+            action="/api/admin/daily-tasks"
             className="mt-6 flex flex-col gap-5"
+            method="post"
           >
+            <input name="operation" type="hidden" value="update" />
             <input name="taskId" type="hidden" value={task.id} />
+            <input name="redirectTo" type="hidden" value={backHref} />
 
             <div className="flex flex-col gap-2">
               <label className="text-sm font-medium" htmlFor="managerNote">
