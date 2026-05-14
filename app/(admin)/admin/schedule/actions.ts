@@ -53,29 +53,6 @@ export async function createDailyTaskAction(formData: FormData) {
     throw new Error("Bu proje secilen gune zaten eklenmis.");
   }
 
-  const conflictingAssignee = await prisma.dailyTaskAssignee.findFirst({
-    where: {
-      userId: {
-        in: assigneeIds,
-      },
-      dailyTask: {
-        taskDate,
-        status: {
-          in: ["PLANNED", "ON_SITE"],
-        },
-      },
-    },
-    include: {
-      user: true,
-    },
-  });
-
-  if (conflictingAssignee) {
-    throw new Error(
-      `${conflictingAssignee.user.fullName} bu gun icin baska aktif goreve atanmis.`,
-    );
-  }
-
   const dailyTask = await prisma.dailyTask.create({
     data: {
       taskDate,
@@ -181,34 +158,6 @@ export async function updateDailyTaskAction(formData: FormData) {
 
   if (!task) {
     throw new Error("Gorev bulunamadi.");
-  }
-
-  if (task.status === "PLANNED") {
-    const conflictingAssignee = await prisma.dailyTaskAssignee.findFirst({
-      where: {
-        userId: {
-          in: assigneeIds,
-        },
-        dailyTaskId: {
-          not: task.id,
-        },
-        dailyTask: {
-          taskDate: task.taskDate,
-          status: {
-            in: ["PLANNED", "ON_SITE"],
-          },
-        },
-      },
-      include: {
-        user: true,
-      },
-    });
-
-    if (conflictingAssignee) {
-      throw new Error(
-        `${conflictingAssignee.user.fullName} bu gun icin baska aktif goreve atanmis.`,
-      );
-    }
   }
 
   await prisma.$transaction(async (tx) => {

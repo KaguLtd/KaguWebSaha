@@ -111,7 +111,7 @@ export function ScheduleDrawerCalendar({
       ) : null}
 
       <section className="mt-4 overflow-hidden rounded-lg border bg-white shadow-card">
-        <div className="grid grid-cols-7 border-b bg-navy text-center text-xs font-medium uppercase text-white/75">
+        <div className="grid grid-cols-7 border-b border-navy/10 bg-white text-center text-xs font-medium uppercase text-slate-950">
           {weekDays.map((day) => (
             <div className="px-2 py-3" key={day}>
               {day}
@@ -125,7 +125,7 @@ export function ScheduleDrawerCalendar({
 
             return (
               <div
-                className={`min-h-32 cursor-pointer border-b border-r p-2 transition hover:bg-primary/5 ${
+                className={`h-36 cursor-pointer border-b border-r p-2 transition hover:bg-primary/5 ${
                   day.isCurrentMonth ? "bg-white" : "bg-navy/5 text-muted-foreground"
                 }`}
                 key={day.date}
@@ -139,11 +139,13 @@ export function ScheduleDrawerCalendar({
                 role="button"
                 tabIndex={0}
               >
-                <span className="text-sm font-semibold text-navy">{day.dayNumber}</span>
-                <div className="mt-2 flex flex-col gap-1">
-                  {dayTasks.slice(0, 4).map((task) => (
+                <span className="block text-sm font-semibold text-navy">
+                  {day.dayNumber}
+                </span>
+                <div className="mt-2 flex h-24 flex-col gap-1 overflow-y-auto overscroll-contain pr-1">
+                  {dayTasks.map((task) => (
                     <button
-                      className="truncate rounded-md border border-primary/20 bg-primary/10 px-2 py-1 text-left text-xs font-medium text-navy underline-offset-2 transition hover:border-primary/40 hover:bg-primary/15 hover:underline"
+                      className="min-h-7 shrink-0 truncate rounded-md border border-primary/20 bg-primary/10 px-2 py-1 text-left text-xs font-medium leading-5 text-navy underline-offset-2 transition hover:border-primary/40 hover:bg-primary/15 hover:underline"
                       key={task.id}
                       onClick={(event) => {
                         event.stopPropagation();
@@ -154,11 +156,6 @@ export function ScheduleDrawerCalendar({
                       {task.projectName}
                     </button>
                   ))}
-                  {dayTasks.length > 4 ? (
-                    <span className="text-xs text-muted-foreground">
-                      +{dayTasks.length - 4} is
-                    </span>
-                  ) : null}
                 </div>
               </div>
             );
@@ -183,7 +180,7 @@ export function ScheduleDrawerCalendar({
             onSubmit={(formData) =>
               submit(formData, createDailyTaskAction, "Gunluk gorev kaydedildi.")
             }
-            personnel={getAvailablePersonnel(drawer.date, personnel, tasks)}
+            personnel={personnel}
             projects={getAvailableProjects(drawer.date, projects, tasks)}
           />
         ) : null}
@@ -424,24 +421,6 @@ function TextArea({
       />
     </div>
   );
-}
-
-function getAvailablePersonnel(
-  date: string,
-  personnel: SchedulePerson[],
-  tasks: ScheduleTask[],
-) {
-  const busyIds = new Set(
-    tasks
-      .filter(
-        (task) =>
-          task.taskDate === date &&
-          (task.status === "PLANNED" || task.status === "ON_SITE"),
-      )
-      .flatMap((task) => task.assignees.map((assignee) => assignee.id)),
-  );
-
-  return personnel.filter((person) => !busyIds.has(person.id));
 }
 
 function getAvailableProjects(

@@ -60,32 +60,47 @@ async function requireAssignedTodayTask(taskId: string, userId: string) {
 
 export async function POST(request: Request) {
   const user = await requireRole("PERSONNEL");
-  const formData = await request.formData();
-  const clientItemId = readRequiredText(formData, "clientItemId");
-  const type = readRequiredText(formData, "type");
-  const taskId = readRequiredText(formData, "taskId");
+  try {
+    const formData = await request.formData();
+    const clientItemId = readRequiredText(formData, "clientItemId");
+    const type = readRequiredText(formData, "type");
+    const taskId = readRequiredText(formData, "taskId");
 
-  const existing = await prisma.offlinePendingItem.findUnique({
-    where: {
-      clientItemId,
-    },
-  });
+    const existing = await prisma.offlinePendingItem.findUnique({
+      where: {
+        clientItemId,
+      },
+    });
 
-  if (existing?.status === "SYNCED") {
-    return NextResponse.json({ ok: true, duplicate: true });
+    if (existing?.status === "SYNCED") {
+      return NextResponse.json({ ok: true, duplicate: true });
+    }
+
+    if (type === "ARRIVED_SITE") {
+      await syncArriveSite(user.id, clientItemId, taskId, formData);
+      return NextResponse.json({ ok: true });
+    }
+
+    if (type === "LEFT_SITE") {
+      await syncLeaveSite(user.id, clientItemId, taskId, formData);
+      return NextResponse.json({ ok: true });
+    }
+
+    if (type === "NOTE") {
+      await syncNote(user.id, clientItemId, taskId, formData);
+      return NextResponse.json({ ok: true });
+    }
+
+    return NextResponse.json(
+      { error: "Gecersiz offline kayit tipi." },
+      { status: 400 },
+    );
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Islem kaydedilemedi." },
+      { status: 400 },
+    );
   }
-
-  if (type === "ARRIVED_SITE") {
-    await syncArriveSite(user.id, clientItemId, taskId, formData);
-    return NextResponse.json({ ok: true });
-  }
-
-  if (type === "LEFT_SITE") {
-    await syncLeaveSite(user.id, clientItemId, taskId, formData);
-    return NextResponse.json({ ok: true });
-  }
-
-  return NextResponse.json({ error: "Gecersiz offline kayit tipi." }, { status: 400 });
 }
 
 async function syncArriveSite(
@@ -99,6 +114,28 @@ async function syncArriveSite(
   const now = new Date();
 
   await prisma.$transaction(async (tx) => {
+    const activeTask = await tx.dailyTask.findFirst({
+      where: {
+        taskDate: getTodayDateOnly(),
+        status: "ON_SITE",
+        id: {
+          not: task.id,
+        },
+        assignees: {
+          some: {
+            userId,
+          },
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (activeTask) {
+      throw new Error("Önce aktif sahadaki görevi kapatmalısın.");
+    }
+
     await tx.offlinePendingItem.upsert({
       where: {
         clientItemId,
@@ -184,27 +221,35 @@ async function syncLeaveSite(
   taskId: string,
   formData: FormData,
 ) {
-  const note = readRequiredText(formData, "note");
   const task = await requireAssignedTodayTask(taskId, userId);
   const { latitude, longitude } = readLocation(formData);
   const now = new Date();
   const durationMinutes = task.arrivedAt
     ? Math.max(0, Math.round((now.getTime() - task.arrivedAt.getTime()) / 60000))
     : null;
-  const files = formData
-    .getAll("files")
-    .filter((value): value is File => value instanceof File && value.size > 0);
-  const savedFiles: SavedProjectUpload[] = [];
-
-  for (const file of files) {
-    const savedFile = await saveProjectUpload(file, task.projectId);
-
-    if (savedFile) {
-      savedFiles.push(savedFile);
-    }
-  }
-
   await prisma.$transaction(async (tx) => {
+    const tomorrow = new Date(task.taskDate);
+    tomorrow.setUTCDate(task.taskDate.getUTCDate() + 1);
+    const todayNote = await tx.projectTimelineEvent.findFirst({
+      where: {
+        projectId: task.projectId,
+        dailyTaskId: task.id,
+        userId,
+        eventType: "NOTE_ADDED",
+        createdAt: {
+          gte: task.taskDate,
+          lt: tomorrow,
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!todayNote) {
+      throw new Error("Bugün yaptıklarının notunu yaz!");
+    }
+
     await tx.offlinePendingItem.upsert({
       where: {
         clientItemId,
@@ -216,7 +261,6 @@ async function syncLeaveSite(
         status: "PENDING",
         payload: {
           taskId,
-          note,
           latitude,
           longitude,
         },
@@ -241,42 +285,23 @@ async function syncLeaveSite(
         projectId: task.projectId,
         userId,
         type: "LEFT_SITE",
-        note,
         latitude,
         longitude,
       },
     });
 
-    await tx.projectNote.create({
+    await tx.projectTimelineEvent.create({
       data: {
         projectId: task.projectId,
+        dailyTaskId: task.id,
         userId,
-        note,
+        eventType: "LEFT_SITE",
+        title: "Sahadan ayrildi",
+        description:
+          durationMinutes !== null
+            ? `Sahada gecen sure: ${durationMinutes} dakika`
+            : null,
       },
-    });
-
-    await tx.projectTimelineEvent.createMany({
-      data: [
-        {
-          projectId: task.projectId,
-          dailyTaskId: task.id,
-          userId,
-          eventType: "LEFT_SITE",
-          title: "Sahadan ayrildi",
-          description:
-            durationMinutes !== null
-              ? `Sahada gecen sure: ${durationMinutes} dakika`
-              : null,
-        },
-        {
-          projectId: task.projectId,
-          dailyTaskId: task.id,
-          userId,
-          eventType: "NOTE_ADDED",
-          title: "Personel not ekledi",
-          description: note,
-        },
-      ],
     });
 
     if (latitude !== null && longitude !== null) {
@@ -291,6 +316,89 @@ async function syncLeaveSite(
         },
       });
     }
+
+    await tx.offlinePendingItem.update({
+      where: {
+        clientItemId,
+      },
+      data: {
+        status: "SYNCED",
+        syncedAt: now,
+        lastError: null,
+      },
+    });
+  });
+}
+
+async function syncNote(
+  userId: string,
+  clientItemId: string,
+  taskId: string,
+  formData: FormData,
+) {
+  const note = readRequiredText(formData, "note");
+  const task = await requireAssignedTodayTask(taskId, userId);
+  const files = formData
+    .getAll("files")
+    .filter((value): value is File => value instanceof File && value.size > 0);
+  const savedFiles: SavedProjectUpload[] = [];
+  const now = new Date();
+
+  for (const file of files) {
+    const savedFile = await saveProjectUpload(file, task.projectId);
+
+    if (savedFile) {
+      savedFiles.push(savedFile);
+    }
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.offlinePendingItem.upsert({
+      where: {
+        clientItemId,
+      },
+      create: {
+        userId,
+        clientItemId,
+        type: "NOTE",
+        status: "PENDING",
+        payload: {
+          taskId,
+          note,
+          fileCount: savedFiles.length,
+        },
+      },
+      update: {},
+    });
+
+    await tx.taskEvent.create({
+      data: {
+        dailyTaskId: task.id,
+        projectId: task.projectId,
+        userId,
+        type: "NOTE_ADDED",
+        note,
+      },
+    });
+
+    await tx.projectNote.create({
+      data: {
+        projectId: task.projectId,
+        userId,
+        note,
+      },
+    });
+
+    await tx.projectTimelineEvent.create({
+      data: {
+        projectId: task.projectId,
+        dailyTaskId: task.id,
+        userId,
+        eventType: "NOTE_ADDED",
+        title: "Personel not ekledi",
+        description: note,
+      },
+    });
 
     for (const savedFile of savedFiles) {
       const projectFile = await tx.projectFile.create({

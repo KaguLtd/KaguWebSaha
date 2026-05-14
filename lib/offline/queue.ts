@@ -2,7 +2,7 @@
 
 import { createClientId } from "@/lib/offline/client-id";
 
-export type OfflineItemType = "ARRIVED_SITE" | "LEFT_SITE";
+export type OfflineItemType = "ARRIVED_SITE" | "LEFT_SITE" | "NOTE";
 
 export type OfflineQueueItem = {
   id: string;

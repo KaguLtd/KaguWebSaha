@@ -76,7 +76,7 @@ export default async function ProjectsPage({
               className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground"
             />
             <input
-              className="w-full rounded-md border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm shadow-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary"
+              className="w-full rounded-md border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm text-navy shadow-sm outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary"
               defaultValue={query}
               name="q"
               placeholder="Proje veya cari ara"
@@ -99,7 +99,7 @@ export default async function ProjectsPage({
           <section className="mt-8 overflow-hidden rounded-lg border border-navy/10 bg-white shadow-card">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[860px] border-collapse text-left text-sm">
-                <thead className="bg-navy text-xs uppercase text-white/75">
+                <thead className="border-b border-navy/10 bg-white text-xs uppercase text-slate-950">
                   <tr>
                     <th className="px-4 py-3 font-semibold">Proje</th>
                     <th className="px-4 py-3 font-semibold">Cari / Firma</th>

@@ -91,7 +91,7 @@ async function TaskTable({
     <section className="mt-8 overflow-hidden rounded-lg border border-navy/10 bg-white shadow-card">
       <div className="overflow-x-auto">
         <table className="w-full min-w-[760px] border-collapse text-left text-sm">
-          <thead className="bg-navy text-xs uppercase text-white/75">
+          <thead className="border-b border-navy/10 bg-white text-xs uppercase text-slate-950">
             <tr>
               <th className="px-4 py-3 font-semibold">Tarih</th>
               <th className="px-4 py-3 font-semibold">Proje</th>
@@ -108,9 +108,6 @@ async function TaskTable({
                 </td>
                 <td className="px-4 py-4">
                   <div className="font-medium">{task.project.name}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    {task.title}
-                  </div>
                 </td>
                 <td className="px-4 py-4">{task.project.customer.name}</td>
                 <td className="px-4 py-4">

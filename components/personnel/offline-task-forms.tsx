@@ -97,12 +97,35 @@ async function submitOrQueue(
   formData.set("clientItemId", createClientId());
   formData.set("type", type);
 
-  const response = await fetch("/api/offline/sync", {
-    method: "POST",
-    body: formData,
-  });
+  let response: Response;
+
+  try {
+    response = await fetch("/api/offline/sync", {
+      method: "POST",
+      body: formData,
+    });
+  } catch {
+    await enqueueOfflineItem({
+      type,
+      taskId,
+      note: note || undefined,
+      latitude: latitude || undefined,
+      longitude: longitude || undefined,
+      files,
+    });
+    setMessage("Sunucuya ulasilamadi. Islem bekleyen kayitlara alindi.");
+    return "queued";
+  }
 
   if (!response.ok) {
+    if (response.status >= 400 && response.status < 500) {
+      const payload = (await response.json().catch(() => null)) as {
+        error?: string;
+      } | null;
+      setMessage(payload?.error || "Islem kaydedilemedi.");
+      return "failed";
+    }
+
     await enqueueOfflineItem({
       type,
       taskId,
@@ -121,9 +144,13 @@ async function submitOrQueue(
 
 export function OfflineArriveForm({
   children,
+  disabled,
+  disabledMessage,
   taskId,
 }: Readonly<{
   children: React.ReactNode;
+  disabled?: boolean;
+  disabledMessage?: string;
   taskId: string;
 }>) {
   const router = useRouter();
@@ -132,6 +159,8 @@ export function OfflineArriveForm({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const form = event.currentTarget;
+
     if (isSubmitting) {
       return;
     }
@@ -139,7 +168,7 @@ export function OfflineArriveForm({
     setIsSubmitting(true);
     setState((current) => ({ ...current, message: "Kaydediliyor..." }));
     try {
-      const result = await submitOrQueue("ARRIVED_SITE", event.currentTarget, (message) =>
+      const result = await submitOrQueue("ARRIVED_SITE", form, (message) =>
         setState((current) => ({ ...current, message })),
       );
       await refreshPending();
@@ -153,15 +182,123 @@ export function OfflineArriveForm({
   }
 
   return (
-    <form onSubmit={handleSubmit}>
+    <form className="flex w-full flex-col items-center text-left" onSubmit={handleSubmit}>
       <input name="taskId" type="hidden" value={taskId} />
-      <fieldset disabled={isSubmitting}>{children}</fieldset>
-      <PendingNotice state={state} />
+      <fieldset
+        className="flex w-full flex-col items-center"
+        disabled={isSubmitting || disabled}
+      >
+        {children}
+      </fieldset>
+      <PendingNotice
+        state={{
+          ...state,
+          message: disabled ? disabledMessage || state.message : state.message,
+        }}
+      />
     </form>
   );
 }
 
 export function OfflineLeaveForm({
+  children,
+  hasTodayNote,
+  taskId,
+}: Readonly<{
+  children: React.ReactNode;
+  hasTodayNote: boolean;
+  taskId: string;
+}>) {
+  const router = useRouter();
+  const { state, refreshPending, setState } = useOfflineSync();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [confirmSeconds, setConfirmSeconds] = useState(0);
+  const isConfirming = confirmSeconds > 0;
+
+  useEffect(() => {
+    if (confirmSeconds === 0) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setConfirmSeconds((current) => Math.max(0, current - 1));
+    }, 1000);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [confirmSeconds]);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+
+    if (isSubmitting) {
+      return;
+    }
+
+    if (!hasTodayNote) {
+      setState((current) => ({
+        ...current,
+        message: "Bugün yaptıklarının notunu yaz!",
+      }));
+      return;
+    }
+
+    if (!isConfirming) {
+      setConfirmSeconds(5);
+      setState((current) => ({
+        ...current,
+        message: "",
+      }));
+      return;
+    }
+
+    setIsSubmitting(true);
+    setState((current) => ({ ...current, message: "Kaydediliyor..." }));
+    try {
+      const result = await submitOrQueue("LEFT_SITE", form, (message) =>
+        setState((current) => ({ ...current, message })),
+      );
+      await refreshPending();
+
+      if (result === "synced") {
+        router.refresh();
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <form className="flex w-full flex-col items-center text-left" onSubmit={handleSubmit}>
+      <input name="taskId" type="hidden" value={taskId} />
+      <fieldset className="flex w-full flex-col items-center" disabled={isSubmitting}>
+        {children}
+        <button
+          className={`flex h-44 w-44 flex-col items-center justify-center rounded-full px-6 text-center text-2xl font-semibold leading-tight text-white shadow-lg transition focus:outline-none focus:ring-4 ${
+            isConfirming
+              ? "bg-orange-500 hover:bg-orange-600 focus:ring-orange-200"
+              : "bg-red-600 hover:bg-red-700 focus:ring-red-200"
+          }`}
+          type="submit"
+        >
+          {isConfirming ? (
+            <>
+              <span className="text-4xl leading-none">{confirmSeconds}</span>
+              <span className="mt-2 text-base font-semibold">Emin Misiniz?</span>
+            </>
+          ) : (
+            "Sahadan Ayrıldım"
+          )}
+        </button>
+      </fieldset>
+      <PendingNotice state={state} />
+    </form>
+  );
+}
+
+export function OfflineNoteForm({
   children,
   taskId,
 }: Readonly<{
@@ -174,6 +311,8 @@ export function OfflineLeaveForm({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const form = event.currentTarget;
+
     if (isSubmitting) {
       return;
     }
@@ -181,12 +320,13 @@ export function OfflineLeaveForm({
     setIsSubmitting(true);
     setState((current) => ({ ...current, message: "Kaydediliyor..." }));
     try {
-      const result = await submitOrQueue("LEFT_SITE", event.currentTarget, (message) =>
+      const result = await submitOrQueue("NOTE", form, (message) =>
         setState((current) => ({ ...current, message })),
       );
       await refreshPending();
 
       if (result === "synced") {
+        form.reset();
         router.refresh();
       }
     } finally {

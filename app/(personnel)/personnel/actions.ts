@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 
 import { requireRole } from "@/lib/auth/session";
 import { getTodayDateOnly } from "@/lib/dates/today";
-import { saveProjectUpload } from "@/lib/files/storage";
 import { parseLatitude, parseLongitude } from "@/lib/location/google-maps";
 import { prisma } from "@/lib/db/prisma";
 
@@ -65,8 +64,30 @@ export async function arriveSiteAction(formData: FormData) {
   const { latitude, longitude } = readLocation(formData);
   const now = new Date();
 
-  await prisma.$transaction([
-    prisma.dailyTask.update({
+  await prisma.$transaction(async (tx) => {
+    const activeTask = await tx.dailyTask.findFirst({
+      where: {
+        taskDate: getTodayDateOnly(),
+        status: "ON_SITE",
+        id: {
+          not: task.id,
+        },
+        assignees: {
+          some: {
+            userId: user.id,
+          },
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (activeTask) {
+      throw new Error("Önce aktif sahadaki görevi kapatmalısın.");
+    }
+
+    await tx.dailyTask.update({
       where: {
         id: task.id,
       },
@@ -74,8 +95,8 @@ export async function arriveSiteAction(formData: FormData) {
         status: "ON_SITE",
         arrivedAt: task.arrivedAt ?? now,
       },
-    }),
-    prisma.taskEvent.create({
+    });
+    await tx.taskEvent.create({
       data: {
         dailyTaskId: task.id,
         projectId: task.projectId,
@@ -84,8 +105,8 @@ export async function arriveSiteAction(formData: FormData) {
         latitude,
         longitude,
       },
-    }),
-    prisma.projectTimelineEvent.create({
+    });
+    await tx.projectTimelineEvent.create({
       data: {
         projectId: task.projectId,
         dailyTaskId: task.id,
@@ -97,8 +118,8 @@ export async function arriveSiteAction(formData: FormData) {
             ? `Konum: ${latitude}, ${longitude}`
             : null,
       },
-    }),
-    prisma.user.update({
+    });
+    await tx.user.update({
       where: {
         id: user.id,
       },
@@ -110,8 +131,8 @@ export async function arriveSiteAction(formData: FormData) {
               lastLocationAt: now,
             }
           : {},
-    }),
-  ]);
+    });
+  });
 
   revalidatePath("/personnel");
   revalidatePath(`/personnel/tasks/${task.id}`);
@@ -120,7 +141,6 @@ export async function arriveSiteAction(formData: FormData) {
 export async function leaveSiteAction(formData: FormData) {
   const user = await requireRole("PERSONNEL");
   const taskId = readRequiredText(formData, "taskId");
-  const note = readRequiredText(formData, "note");
   const task = await requireAssignedTodayTask(taskId, user.id);
   const { latitude, longitude } = readLocation(formData);
   const now = new Date();
@@ -129,6 +149,28 @@ export async function leaveSiteAction(formData: FormData) {
     : null;
 
   await prisma.$transaction(async (tx) => {
+    const tomorrow = new Date(task.taskDate);
+    tomorrow.setUTCDate(task.taskDate.getUTCDate() + 1);
+    const todayNote = await tx.projectTimelineEvent.findFirst({
+      where: {
+        projectId: task.projectId,
+        dailyTaskId: task.id,
+        userId: user.id,
+        eventType: "NOTE_ADDED",
+        createdAt: {
+          gte: task.taskDate,
+          lt: tomorrow,
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!todayNote) {
+      throw new Error("Bugün yaptıklarının notunu yaz!");
+    }
+
     await tx.dailyTask.update({
       where: {
         id: task.id,
@@ -146,42 +188,23 @@ export async function leaveSiteAction(formData: FormData) {
         projectId: task.projectId,
         userId: user.id,
         type: "LEFT_SITE",
-        note,
         latitude,
         longitude,
       },
     });
 
-    await tx.projectNote.create({
+    await tx.projectTimelineEvent.create({
       data: {
         projectId: task.projectId,
+        dailyTaskId: task.id,
         userId: user.id,
-        note,
+        eventType: "LEFT_SITE",
+        title: "Sahadan ayrildi",
+        description:
+          durationMinutes !== null
+            ? `Sahada gecen sure: ${durationMinutes} dakika`
+            : null,
       },
-    });
-
-    await tx.projectTimelineEvent.createMany({
-      data: [
-        {
-          projectId: task.projectId,
-          dailyTaskId: task.id,
-          userId: user.id,
-          eventType: "LEFT_SITE",
-          title: "Sahadan ayrildi",
-          description:
-            durationMinutes !== null
-              ? `Sahada gecen sure: ${durationMinutes} dakika`
-              : null,
-        },
-        {
-          projectId: task.projectId,
-          dailyTaskId: task.id,
-          userId: user.id,
-          eventType: "NOTE_ADDED",
-          title: "Personel not ekledi",
-          description: note,
-        },
-      ],
     });
 
     if (latitude !== null && longitude !== null) {
@@ -198,44 +221,6 @@ export async function leaveSiteAction(formData: FormData) {
     }
   });
 
-  const files = formData
-    .getAll("files")
-    .filter((value): value is File => value instanceof File && value.size > 0);
-
-  for (const file of files) {
-    const savedFile = await saveProjectUpload(file, task.projectId);
-
-    if (!savedFile) {
-      continue;
-    }
-
-    const projectFile = await prisma.projectFile.create({
-      data: {
-        projectId: task.projectId,
-        dailyTaskId: task.id,
-        uploadedByUserId: user.id,
-        originalName: savedFile.originalName,
-        mimeType: savedFile.mimeType,
-        sizeBytes: savedFile.sizeBytes,
-        storagePath: savedFile.storagePath,
-        note,
-      },
-    });
-
-    await prisma.projectTimelineEvent.create({
-      data: {
-        projectId: task.projectId,
-        dailyTaskId: task.id,
-        userId: user.id,
-        eventType: "FILE_ADDED",
-        title: "Personel dosya ekledi",
-        description: savedFile.originalName,
-        fileId: projectFile.id,
-      },
-    });
-  }
-
   revalidatePath("/personnel");
   revalidatePath(`/personnel/tasks/${task.id}`);
 }
-
