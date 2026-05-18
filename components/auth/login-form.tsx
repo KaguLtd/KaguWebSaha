@@ -47,7 +47,7 @@ export function LoginForm() {
       ) : null}
 
       <Button className="w-full" disabled={pending} type="submit">
-        {pending ? "Giris yapiliyor" : "Giris yap"}
+        {pending ? "Giris yapiliyor" : "Giris Yap"}
       </Button>
     </form>
   );
