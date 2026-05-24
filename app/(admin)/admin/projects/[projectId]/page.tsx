@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { FileText, MapPin } from "lucide-react";
+import { MapPin } from "lucide-react";
 
+import { FilePreviewCard, FilePreviewGrid } from "@/components/files/file-preview";
+import { LocationDescription } from "@/components/location/location-description";
 import { Button } from "@/components/ui/button";
+import { requireAnyRole } from "@/lib/auth/session";
 import { formatDisplayDate, formatDisplayTime } from "@/lib/dates/format";
-import { formatFileSize } from "@/lib/files/storage";
 import { prisma } from "@/lib/db/prisma";
 
 export const dynamic = "force-dynamic";
@@ -16,6 +18,7 @@ export default async function ProjectDetailPage({
     projectId: string;
   }>;
 }) {
+  const user = await requireAnyRole(["ADMIN", "OBSERVER"]);
   const { projectId } = await params;
   const project = await prisma.project.findUnique({
     where: {
@@ -65,9 +68,11 @@ export default async function ProjectDetailPage({
             <h1 className="mt-3 text-3xl font-semibold">{project.name}</h1>
             <p className="mt-2 text-muted-foreground">{project.customer.name}</p>
           </div>
-          <Button asChild variant="outline">
-            <Link href="/admin/projects/new">Yeni proje</Link>
-          </Button>
+          {user.role === "ADMIN" ? (
+            <Button asChild variant="outline">
+              <Link href="/admin/projects/new">Yeni proje</Link>
+            </Button>
+          ) : null}
         </div>
 
         <section className="grid gap-4 lg:grid-cols-[1fr_360px]">
@@ -114,36 +119,17 @@ export default async function ProjectDetailPage({
             {project.files.length === 0 ? (
               <p className="mt-4 text-sm text-muted-foreground">Dosya yok.</p>
             ) : (
-              <ul className="mt-4 flex flex-col gap-3">
-                {project.files.map((file) => (
-                  <li
-                    className="flex items-start justify-between gap-3 rounded-md border border-primary/15 p-3 transition hover:bg-primary/5"
-                    key={file.id}
-                  >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 font-medium text-navy">
-                        <FileText className="h-4 w-4 shrink-0" aria-hidden="true" />
-                        <span className="truncate">{file.originalName}</span>
-                      </div>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {formatFileSize(file.sizeBytes)} ·{" "}
-                        {formatDisplayDate(file.createdAt)}
-                      </p>
-                    </div>
-                    <Button asChild size="sm" variant="outline">
-                      <a download href={`/api/files/${file.id}`}>
-                        Indir
-                      </a>
-                    </Button>
-                  </li>
-                ))}
-              </ul>
+              <div className="mt-4">
+                <FilePreviewGrid files={project.files} />
+              </div>
             )}
           </article>
         </section>
 
         <section className="rounded-lg border border-navy/10 bg-white p-5 shadow-card">
-          <h2 className="rounded-md bg-primary/5 px-3 py-2 text-lg font-semibold text-navy">Timeline</h2>
+          <h2 className="rounded-md bg-primary/5 px-3 py-2 text-lg font-semibold text-navy">
+            Timeline
+          </h2>
           {groupedTimeline.length === 0 ? (
             <p className="mt-4 text-sm text-muted-foreground">
               Timeline kaydi yok.
@@ -157,10 +143,15 @@ export default async function ProjectDetailPage({
                   </h3>
                   <ol className="mt-3 flex flex-col gap-3">
                     {group.events.map((event) => (
-                      <li className="rounded-md border border-navy/10 p-4 transition hover:bg-primary/5" key={event.id}>
+                      <li
+                        className="rounded-md border border-navy/10 p-4 transition hover:bg-primary/5"
+                        key={event.id}
+                      >
                         <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
                           <div>
-                            <p className="text-xs font-semibold uppercase text-primary">{event.title}</p>
+                            <p className="text-xs font-semibold uppercase text-primary">
+                              {event.title}
+                            </p>
                             <p className="mt-1 text-xs text-muted-foreground">
                               {event.user?.fullName || "Sistem"} tarafindan yapildi
                             </p>
@@ -170,12 +161,9 @@ export default async function ProjectDetailPage({
                             <span>{formatDisplayTime(event.createdAt)}</span>
                           </div>
                         </div>
-                        <p className="hidden">
-                          {event.user?.fullName || "Sistem"} · {event.eventType}
-                        </p>
                         {event.description && event.description !== event.file?.originalName ? (
                           <p className="mt-3 rounded-md bg-white px-3 py-2 text-base leading-7 text-navy">
-                            {event.description}
+                            <LocationDescription description={event.description} />
                           </p>
                         ) : !event.file ? (
                           <p className="mt-3 rounded-md bg-white px-3 py-2 text-sm leading-6 text-muted-foreground">
@@ -183,15 +171,8 @@ export default async function ProjectDetailPage({
                           </p>
                         ) : null}
                         {event.file ? (
-                          <div className="mt-3 flex items-center justify-between gap-3 rounded-md bg-white px-3 py-2">
-                            <span className="min-w-0 truncate text-sm font-medium text-navy">
-                              {event.file.originalName}
-                            </span>
-                            <Button asChild size="sm" variant="outline">
-                              <a download href={`/api/files/${event.file.id}`}>
-                                Indir
-                              </a>
-                            </Button>
+                          <div className="mt-3 max-w-sm">
+                            <FilePreviewCard file={event.file} />
                           </div>
                         ) : null}
                       </li>

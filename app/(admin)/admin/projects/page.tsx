@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Search } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { requireAnyRole } from "@/lib/auth/session";
 import { formatDisplayDate } from "@/lib/dates/format";
 import { prisma } from "@/lib/db/prisma";
 
@@ -14,6 +15,7 @@ export default async function ProjectsPage({
     q?: string;
   }>;
 }) {
+  const user = await requireAnyRole(["ADMIN", "OBSERVER"]);
   const params = await searchParams;
   const query = String(params?.q ?? "").trim();
   const projects = await prisma.project.findMany({
@@ -64,9 +66,11 @@ export default async function ProjectsPage({
               Proje dosyalarini ara ve gecmis timeline kayitlarini goruntule.
             </p>
           </div>
-          <Button asChild>
-            <Link href="/admin/projects/new">Yeni proje</Link>
-          </Button>
+          {user.role === "ADMIN" ? (
+            <Button asChild>
+              <Link href="/admin/projects/new">Yeni proje</Link>
+            </Button>
+          ) : null}
         </div>
 
         <form className="mt-6 flex max-w-lg gap-2">

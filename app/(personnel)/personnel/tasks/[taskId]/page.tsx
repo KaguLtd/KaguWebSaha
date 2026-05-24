@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
-import { FileText, MapPin } from "lucide-react";
+import { MapPin } from "lucide-react";
 
+import { FilePreviewCard, FilePreviewGrid } from "@/components/files/file-preview";
+import { LocationDescription } from "@/components/location/location-description";
 import { LocationFields } from "@/components/personnel/location-fields";
 import {
   OfflineArriveForm,
@@ -211,19 +213,9 @@ export default async function PersonnelTaskDetailPage({
         {task.project.files.length > 0 ? (
           <section className="rounded-lg border bg-white p-5 shadow-sm">
             <h2 className="text-lg font-semibold">Dosyalar</h2>
-            <ul className="mt-4 flex flex-col gap-3">
-              {task.project.files.slice(0, 10).map((file) => (
-                <li key={file.id}>
-                  <a
-                    className="inline-flex max-w-full items-center gap-2 text-sm font-medium text-primary hover:underline"
-                    href={`/api/files/${file.id}`}
-                  >
-                    <FileText className="h-4 w-4 shrink-0" aria-hidden="true" />
-                    <span className="truncate">{file.originalName}</span>
-                  </a>
-                </li>
-              ))}
-            </ul>
+            <div className="mt-4">
+              <FilePreviewGrid files={task.project.files.slice(0, 10)} />
+            </div>
           </section>
         ) : null}
 
@@ -249,18 +241,14 @@ export default async function PersonnelTaskDetailPage({
                   </div>
                   {event.description &&
                   event.description !== event.file?.originalName ? (
-                    <p className="mt-3 text-sm leading-6">{event.description}</p>
+                    <p className="mt-3 text-sm leading-6">
+                      <LocationDescription description={event.description} />
+                    </p>
                   ) : null}
                   {event.file ? (
-                    <a
-                      className="mt-3 inline-flex max-w-full min-w-0 items-center gap-2 text-sm font-medium text-primary hover:underline"
-                      href={`/api/files/${event.file.id}`}
-                    >
-                      <FileText className="h-4 w-4 shrink-0" aria-hidden="true" />
-                      <span className="min-w-0 truncate">
-                        {event.file.originalName}
-                      </span>
-                    </a>
+                    <div className="mt-3">
+                      <FilePreviewCard file={event.file} />
+                    </div>
                   ) : null}
                 </li>
               ))}

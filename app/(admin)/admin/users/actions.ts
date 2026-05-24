@@ -8,7 +8,11 @@ import { requireRole } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/prisma";
 
 function parseRole(value: FormDataEntryValue | null): UserRole {
-  return value === "ADMIN" ? "ADMIN" : "PERSONNEL";
+  if (value === "ADMIN" || value === "OBSERVER" || value === "PERSONNEL") {
+    return value;
+  }
+
+  return "PERSONNEL";
 }
 
 function parseRequiredText(formData: FormData, name: string) {
@@ -73,4 +77,3 @@ export async function updateUserAction(formData: FormData) {
 
   revalidatePath("/admin/users");
 }
-

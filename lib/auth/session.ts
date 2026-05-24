@@ -89,8 +89,22 @@ export async function requireRole(role: UserRole) {
   const user = await requireUser();
 
   if (user.role !== role) {
-    redirect(user.role === "ADMIN" ? "/admin" : "/personnel");
+    redirect(getRoleHomePath(user.role));
   }
 
   return user;
+}
+
+export async function requireAnyRole(roles: UserRole[]) {
+  const user = await requireUser();
+
+  if (!roles.includes(user.role)) {
+    redirect(getRoleHomePath(user.role));
+  }
+
+  return user;
+}
+
+export function getRoleHomePath(role: UserRole) {
+  return role === "ADMIN" || role === "OBSERVER" ? "/admin" : "/personnel";
 }

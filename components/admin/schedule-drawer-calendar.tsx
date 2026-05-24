@@ -51,6 +51,8 @@ type DrawerState =
   | null;
 
 type ScheduleDrawerCalendarProps = {
+  currentUserId: string;
+  currentUserRole: "ADMIN" | "OBSERVER" | "PERSONNEL";
   days: ScheduleDay[];
   personnel: SchedulePerson[];
   projects: ScheduleProject[];
@@ -60,6 +62,8 @@ type ScheduleDrawerCalendarProps = {
 const weekDays = ["Pzt", "Sali", "Cars", "Pers", "Cuma", "Cmt", "Paz"];
 
 export function ScheduleDrawerCalendar({
+  currentUserId,
+  currentUserRole,
   days,
   personnel,
   projects,
@@ -94,7 +98,10 @@ export function ScheduleDrawerCalendar({
 
     try {
       if (action === createDailyTaskAction || action === updateDailyTaskAction) {
-        formData.set("operation", action === createDailyTaskAction ? "create" : "update");
+        if (!formData.has("operation")) {
+          formData.set("operation", action === createDailyTaskAction ? "create" : "update");
+        }
+        await appendCurrentLocation(formData);
         const response = await fetch("/api/admin/daily-tasks", {
           method: "POST",
           body: formData,
@@ -190,6 +197,8 @@ export function ScheduleDrawerCalendar({
       >
         {drawer?.mode === "create" ? (
           <CreateTaskForm
+            currentUserId={currentUserId}
+            currentUserRole={currentUserRole}
             date={drawer.date}
             isPending={isPending}
             onSubmit={(formData) =>
@@ -202,6 +211,8 @@ export function ScheduleDrawerCalendar({
 
         {drawer?.mode === "edit" && selectedTask ? (
           <EditTaskForm
+            currentUserId={currentUserId}
+            currentUserRole={currentUserRole}
             isPending={isPending}
             onSubmit={(formData) =>
               submit(formData, updateDailyTaskAction, "Gunluk gorev guncellendi.")
@@ -219,18 +230,24 @@ export function ScheduleDrawerCalendar({
 }
 
 function CreateTaskForm({
+  currentUserId,
+  currentUserRole,
   date,
   isPending,
   onSubmit,
   personnel,
   projects,
 }: {
+  currentUserId: string;
+  currentUserRole: "ADMIN" | "OBSERVER" | "PERSONNEL";
   date: string;
   isPending: boolean;
   onSubmit: (formData: FormData) => void;
   personnel: SchedulePerson[];
   projects: ScheduleProject[];
 }) {
+  const isObserver = currentUserRole === "OBSERVER";
+
   return (
     <form
       className="flex flex-col gap-4"
@@ -241,9 +258,17 @@ function CreateTaskForm({
     >
       <input name="taskDate" type="hidden" value={date} />
       <ProjectSelect projects={projects} />
-      <TextArea label="O gune ait yonetici notu" name="managerNote" rows={4} />
-      <FileInput label="O gune ait dosya" />
-      <AssigneeFields personnel={personnel} selectedIds={new Set()} />
+      <TextArea
+        label={isObserver ? "Ziyaret notu" : "O gune ait yonetici notu"}
+        name={isObserver ? "timelineNote" : "managerNote"}
+        rows={4}
+      />
+      <FileInput label={isObserver ? "Ziyaret dosyasi" : "O gune ait dosya"} />
+      {isObserver ? (
+        <input name="assigneeIds" type="hidden" value={currentUserId} />
+      ) : (
+        <AssigneeFields personnel={personnel} selectedIds={new Set()} />
+      )}
       {projects.length === 0 ? (
         <p className="rounded-md border border-primary/15 bg-primary/5 px-3 py-2 text-sm text-muted-foreground">
           Bu gune eklenebilecek aktif proje kalmadi.
@@ -257,18 +282,23 @@ function CreateTaskForm({
 }
 
 function EditTaskForm({
+  currentUserId,
+  currentUserRole,
   isPending,
   onRemove,
   onSubmit,
   personnel,
   task,
 }: {
+  currentUserId: string;
+  currentUserRole: "ADMIN" | "OBSERVER" | "PERSONNEL";
   isPending: boolean;
   onRemove: (formData: FormData) => void;
   onSubmit: (formData: FormData) => void;
   personnel: SchedulePerson[];
   task: ScheduleTask;
 }) {
+  const isObserver = currentUserRole === "OBSERVER";
   const canEditAssignees = task.status === "PLANNED";
   const selectedIds = new Set(task.assignees.map((assignee) => assignee.id));
 
@@ -281,6 +311,7 @@ function EditTaskForm({
       }}
     >
       <input name="taskId" type="hidden" value={task.id} />
+      {isObserver ? <input name="assigneeIds" type="hidden" value={currentUserId} /> : null}
       <div className="rounded-md border border-primary/15 bg-primary/5 p-3 shadow-sm">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -292,24 +323,54 @@ function EditTaskForm({
           <StatusBadge status={task.status} />
         </div>
       </div>
+      {isObserver ? (
+        <div className="rounded-md border border-primary/15 bg-primary/5 p-3 text-sm text-muted-foreground">
+          Saha kontrol kullanicisi bu gorevin durumunu veya personel atamalarini
+          degistirmez; sadece ziyaret, not ve dosya kaydi ekler.
+        </div>
+      ) : (
+        <>
+          <TextArea
+            defaultValue={task.managerNote}
+            label="Yonetici notu"
+            name="managerNote"
+            rows={4}
+          />
+          <AssigneeFields
+            disabled={!canEditAssignees}
+            personnel={personnel}
+            selectedIds={selectedIds}
+          />
+        </>
+      )}
       <TextArea
-        defaultValue={task.managerNote}
-        label="Yonetici notu"
-        name="managerNote"
-        rows={4}
+        label={isObserver ? "Ziyaret / kontrol notu" : "Timeline'a yeni not ekle"}
+        name="timelineNote"
+        rows={3}
       />
-      <TextArea label="Timeline'a yeni not ekle" name="timelineNote" rows={3} />
-      <FileInput label="Dosya ekle" />
-      <AssigneeFields
-        disabled={!canEditAssignees}
-        personnel={personnel}
-        selectedIds={selectedIds}
-      />
+      <FileInput label={isObserver ? "Not / dosya ekle" : "Dosya ekle"} />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <Button disabled={isPending} type="submit">
-          {isPending ? "Kaydediliyor..." : "Kaydet"}
-        </Button>
-        {task.status === "PLANNED" ? (
+        <div className="flex flex-wrap gap-3">
+          {isObserver ? (
+            <Button
+              disabled={isPending}
+              onClick={() => {
+                const formData = new FormData();
+                formData.set("taskId", task.id);
+                formData.set("operation", "visit");
+                onSubmit(formData);
+              }}
+              type="button"
+              variant="outline"
+            >
+              {isPending ? "Kaydediliyor..." : "Ziyaret Ettim"}
+            </Button>
+          ) : null}
+          <Button disabled={isPending} type="submit">
+            {isPending ? "Kaydediliyor..." : "Kaydet"}
+          </Button>
+        </div>
+        {!isObserver && task.status === "PLANNED" ? (
           <Button
             disabled={isPending}
             onClick={() => {
@@ -330,6 +391,28 @@ function EditTaskForm({
       </div>
     </form>
   );
+}
+
+function appendCurrentLocation(formData: FormData) {
+  if (!("geolocation" in navigator)) {
+    return Promise.resolve();
+  }
+
+  return new Promise<void>((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        formData.set("latitude", String(position.coords.latitude));
+        formData.set("longitude", String(position.coords.longitude));
+        resolve();
+      },
+      () => resolve(),
+      {
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: 8000,
+      },
+    );
+  });
 }
 
 function ProjectSelect({ projects }: { projects: ScheduleProject[] }) {

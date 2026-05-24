@@ -1,46 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 export function LocationFields() {
-  const [location, setLocation] = useState<{
-    latitude: string;
-    longitude: string;
-  }>({
-    latitude: "",
-    longitude: "",
-  });
-
-  useEffect(() => {
-    if (!("geolocation" in navigator)) {
-      return;
-    }
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setLocation({
-          latitude: String(position.coords.latitude),
-          longitude: String(position.coords.longitude),
-        });
-      },
-      () => {
-        setLocation({
-          latitude: "",
-          longitude: "",
-        });
-      },
-      {
-        enableHighAccuracy: true,
-        maximumAge: 60000,
-        timeout: 8000,
-      },
-    );
-  }, []);
-
   return (
     <>
-      <input name="latitude" type="hidden" value={location.latitude} />
-      <input name="longitude" type="hidden" value={location.longitude} />
+      <input name="latitude" type="hidden" />
+      <input name="longitude" type="hidden" />
     </>
   );
 }

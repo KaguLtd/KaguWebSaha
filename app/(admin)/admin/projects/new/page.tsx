@@ -1,9 +1,12 @@
 import { ProjectDrawers } from "@/components/admin/project-drawers";
+import { requireRole } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/prisma";
 
 export const dynamic = "force-dynamic";
 
 export default async function NewProjectPage() {
+  await requireRole("ADMIN");
+
   const [customers, projects] = await Promise.all([
     prisma.customer.findMany({
       orderBy: {

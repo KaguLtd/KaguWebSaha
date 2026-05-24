@@ -10,6 +10,7 @@ import {
   toDateInputValue,
 } from "@/lib/dates/calendar";
 import { getTodayDateOnly } from "@/lib/dates/today";
+import { requireAnyRole } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/prisma";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +24,7 @@ export default async function SchedulePage({
   }>;
 }) {
   const params = await searchParams;
+  const user = await requireAnyRole(["ADMIN", "OBSERVER"]);
   const today = getTodayDateOnly();
   const selectedDate = parseDateOnly(params?.date) ?? today;
   const monthDate = parseDateOnly(`${params?.month ?? ""}-01`) ?? selectedDate;
@@ -65,15 +67,17 @@ export default async function SchedulePage({
         name: "asc",
       },
     }),
-    prisma.user.findMany({
-      where: {
-        role: "PERSONNEL",
-        isActive: true,
-      },
-      orderBy: {
-        fullName: "asc",
-      },
-    }),
+    user.role === "OBSERVER"
+      ? Promise.resolve([user])
+      : prisma.user.findMany({
+          where: {
+            role: "PERSONNEL",
+            isActive: true,
+          },
+          orderBy: {
+            fullName: "asc",
+          },
+        }),
   ]);
 
   return (
@@ -112,6 +116,8 @@ export default async function SchedulePage({
         </section>
 
         <ScheduleDrawerCalendar
+          currentUserId={user.id}
+          currentUserRole={user.role}
           days={calendarDays.map((date) => ({
             date: toDateInputValue(date),
             dayNumber: date.getUTCDate(),

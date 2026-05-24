@@ -39,6 +39,10 @@ const navItems = [
   },
 ];
 
+const observerNavItems = navItems.filter((item) =>
+  ["/admin", "/admin/schedule"].includes(item.href),
+);
+
 export function AdminShell({
   children,
   user,
@@ -46,18 +50,21 @@ export function AdminShell({
   children: React.ReactNode;
   user: User;
 }>) {
+  const visibleNavItems = user.role === "OBSERVER" ? observerNavItems : navItems;
+  const roleLabel = user.role === "OBSERVER" ? "Saha Kontrol" : "Yonetici";
+
   return (
     <div className="min-h-screen bg-muted text-navy">
       <aside className="fixed inset-y-0 left-0 hidden w-64 border-r border-navy/10 bg-muted px-4 py-5 text-navy shadow-xl md:block">
         <Link className="block px-2" href="/admin">
           <span className="text-lg font-semibold">Kagu Saha</span>
           <span className="mt-1 block text-sm text-muted-foreground">
-            Yonetici Paneli
+            {roleLabel} Paneli
           </span>
         </Link>
 
         <nav className="mt-8 flex flex-col gap-1">
-          {navItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const Icon = item.icon;
 
             return (
@@ -78,7 +85,7 @@ export function AdminShell({
         <header className="border-b bg-white shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4">
             <div>
-              <p className="text-sm font-medium text-primary">Yonetici</p>
+              <p className="text-sm font-medium text-primary">{roleLabel}</p>
               <p className="font-semibold text-navy">{user.fullName}</p>
             </div>
             <form action={logoutAction}>
@@ -88,7 +95,7 @@ export function AdminShell({
             </form>
           </div>
           <nav className="flex gap-2 overflow-x-auto border-t bg-muted px-6 py-3 md:hidden">
-            {navItems.map((item) => {
+            {visibleNavItems.map((item) => {
               const Icon = item.icon;
 
               return (

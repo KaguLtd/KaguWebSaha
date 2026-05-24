@@ -1,10 +1,13 @@
 import { UserDrawers } from "@/components/admin/user-drawers";
 import { formatDisplayDate, formatDisplayTime } from "@/lib/dates/format";
+import { requireRole } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/prisma";
 
 export const dynamic = "force-dynamic";
 
 export default async function UsersPage() {
+  await requireRole("ADMIN");
+
   const users = await prisma.user.findMany({
     orderBy: [{ isActive: "desc" }, { fullName: "asc" }],
   });

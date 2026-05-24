@@ -9,6 +9,7 @@ datasource db {
 
 enum UserRole {
   ADMIN
+  OBSERVER
   PERSONNEL
 }
 
@@ -23,6 +24,7 @@ enum TaskEventType {
   TASK_UPDATED
   PERSON_ASSIGNED
   ARRIVED_SITE
+  SITE_VISITED
   LEFT_SITE
   NOTE_ADDED
   FILE_ADDED
@@ -34,6 +36,7 @@ enum TimelineEventType {
   TASK_UPDATED
   PERSON_ASSIGNED
   ARRIVED_SITE
+  SITE_VISITED
   LEFT_SITE
   NOTE_ADDED
   FILE_ADDED

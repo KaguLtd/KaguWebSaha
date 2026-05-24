@@ -72,6 +72,8 @@ async function submitOrQueue(
   form: HTMLFormElement,
   setMessage: (message: string) => void,
 ) {
+  await refreshFormLocation(form);
+
   const formData = new FormData(form);
   const taskId = String(formData.get("taskId") ?? "");
   const note = String(formData.get("note") ?? "");
@@ -140,6 +142,37 @@ async function submitOrQueue(
 
   setMessage("Islem kaydedildi.");
   return "synced";
+}
+
+function refreshFormLocation(form: HTMLFormElement) {
+  if (!("geolocation" in navigator)) {
+    return Promise.resolve();
+  }
+
+  return new Promise<void>((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const latitude = form.elements.namedItem("latitude");
+        const longitude = form.elements.namedItem("longitude");
+
+        if (latitude instanceof HTMLInputElement) {
+          latitude.value = String(position.coords.latitude);
+        }
+
+        if (longitude instanceof HTMLInputElement) {
+          longitude.value = String(position.coords.longitude);
+        }
+
+        resolve();
+      },
+      () => resolve(),
+      {
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: 8000,
+      },
+    );
+  });
 }
 
 export function OfflineArriveForm({

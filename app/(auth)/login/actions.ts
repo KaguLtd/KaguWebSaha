@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 
-import { createSession, destroySession } from "@/lib/auth/session";
+import { createSession, destroySession, getRoleHomePath } from "@/lib/auth/session";
 import { verifyPassword } from "@/lib/auth/password";
 import { prisma } from "@/lib/db/prisma";
 
@@ -33,11 +33,10 @@ export async function loginAction(
 
   await createSession(user.id);
 
-  redirect(user.role === "ADMIN" ? "/admin" : "/personnel");
+  redirect(getRoleHomePath(user.role));
 }
 
 export async function logoutAction() {
   await destroySession();
   redirect("/login");
 }
-

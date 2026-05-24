@@ -8,7 +8,7 @@ import { prisma } from "@/lib/db/prisma";
 import { resolveStoragePath } from "@/lib/files/storage";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   {
     params,
   }: {
@@ -30,11 +30,15 @@ export async function GET(
           dailyTasks: {
             where: {
               taskDate: getTodayDateOnly(),
-              assignees: {
-                some: {
-                  userId: user.id,
-                },
-              },
+              ...(user.role === "OBSERVER"
+                ? {}
+                : {
+                    assignees: {
+                      some: {
+                        userId: user.id,
+                      },
+                    },
+                  }),
             },
             select: {
               id: true,
@@ -63,12 +67,14 @@ export async function GET(
     return NextResponse.json({ error: "Dosya depoda bulunamadi." }, { status: 404 });
   }
   const encodedFileName = encodeURIComponent(path.basename(file.originalName));
+  const url = new URL(request.url);
+  const disposition = url.searchParams.get("download") === "1" ? "attachment" : "inline";
 
   return new Response(new Uint8Array(bytes), {
     headers: {
       "Content-Type": file.mimeType,
       "Content-Length": String(bytes.byteLength),
-      "Content-Disposition": `attachment; filename*=UTF-8''${encodedFileName}`,
+      "Content-Disposition": `${disposition}; filename*=UTF-8''${encodedFileName}`,
     },
   });
 }

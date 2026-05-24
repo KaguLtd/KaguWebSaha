@@ -15,7 +15,7 @@ export type UserDrawerUser = {
   lastLatitude: string | null;
   lastLocationLabel: string | null;
   lastLongitude: string | null;
-  role: "ADMIN" | "PERSONNEL";
+  role: "ADMIN" | "OBSERVER" | "PERSONNEL";
   username: string;
 };
 
@@ -95,7 +95,7 @@ export function UserDrawers({ users }: { users: UserDrawerUser[] }) {
           ) : (
             users.map((user) => (
               <div
-                className="flex flex-col gap-4 border-l-2 border-transparent p-5 transition hover:border-primary hover:bg-primary/5 sm:flex-row sm:items-center sm:justify-between"
+                className="grid gap-4 border-l-2 border-transparent p-5 transition hover:border-primary hover:bg-primary/5 md:grid-cols-[1fr_240px_auto] md:items-center"
                 key={user.id}
               >
                 <div>
@@ -112,13 +112,28 @@ export function UserDrawers({ users }: { users: UserDrawerUser[] }) {
                     </span>
                   </div>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    {user.username} - {user.role === "ADMIN" ? "Yonetici" : "Personel"}
+                    {user.username} - {formatRole(user.role)}
                   </p>
-                  {user.role === "PERSONNEL" && user.lastLocationLabel ? (
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Son konum: {user.lastLocationLabel}
-                    </p>
-                  ) : null}
+                </div>
+                <div className="text-sm">
+                  <p className="text-xs font-medium uppercase text-muted-foreground">
+                    Son konum
+                  </p>
+                  {user.lastLatitude && user.lastLongitude && user.lastLocationLabel ? (
+                    <a
+                      className="mt-1 inline-flex max-w-full flex-col font-medium text-primary hover:underline"
+                      href={`https://www.google.com/maps?q=${user.lastLatitude},${user.lastLongitude}`}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      <span>{user.lastLocationLabel}</span>
+                      <span className="truncate text-xs text-muted-foreground">
+                        Haritada ac
+                      </span>
+                    </a>
+                  ) : (
+                    <p className="mt-1 text-sm text-muted-foreground">Kayit yok</p>
+                  )}
                 </div>
                 <Button
                   onClick={() => setDrawer({ mode: "edit", userId: user.id })}
@@ -193,30 +208,28 @@ export function UserDrawers({ users }: { users: UserDrawerUser[] }) {
             </label>
             <Field label="Yeni Sifre Belirle" name="newPassword" type="password" />
 
-            {selectedUser.role === "PERSONNEL" ? (
-              <div className="rounded-md border border-primary/15 bg-primary/5 p-3">
-                <p className="text-sm font-medium text-navy">Son konum</p>
-                {selectedUser.lastLatitude &&
-                selectedUser.lastLongitude &&
-                selectedUser.lastLocationLabel ? (
-                  <div className="mt-2 flex flex-col gap-2 text-sm text-muted-foreground">
-                    <p>{selectedUser.lastLocationLabel}</p>
-                    <a
-                      className="font-medium text-primary hover:underline"
-                      href={`https://www.google.com/maps?q=${selectedUser.lastLatitude},${selectedUser.lastLongitude}`}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      Google Maps'te ac
-                    </a>
-                  </div>
-                ) : (
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    Henuz konum kaydi yok.
-                  </p>
-                )}
-              </div>
-            ) : null}
+            <div className="rounded-md border border-primary/15 bg-primary/5 p-3">
+              <p className="text-sm font-medium text-navy">Son konum</p>
+              {selectedUser.lastLatitude &&
+              selectedUser.lastLongitude &&
+              selectedUser.lastLocationLabel ? (
+                <div className="mt-2 flex flex-col gap-2 text-sm text-muted-foreground">
+                  <p>{selectedUser.lastLocationLabel}</p>
+                  <a
+                    className="font-medium text-primary hover:underline"
+                    href={`https://www.google.com/maps?q=${selectedUser.lastLatitude},${selectedUser.lastLongitude}`}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    Google Maps'te ac
+                  </a>
+                </div>
+              ) : (
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Henuz konum kaydi yok.
+                </p>
+              )}
+            </div>
 
             <Button disabled={isPending} type="submit">
               {isPending ? "Kaydediliyor..." : "Kaydet"}
@@ -228,7 +241,11 @@ export function UserDrawers({ users }: { users: UserDrawerUser[] }) {
   );
 }
 
-function RoleSelect({ defaultValue = "PERSONNEL" }: { defaultValue?: "ADMIN" | "PERSONNEL" }) {
+function RoleSelect({
+  defaultValue = "PERSONNEL",
+}: {
+  defaultValue?: "ADMIN" | "OBSERVER" | "PERSONNEL";
+}) {
   return (
     <div className="flex flex-col gap-2">
       <label className="text-sm font-medium text-navy" htmlFor="role">
@@ -241,10 +258,23 @@ function RoleSelect({ defaultValue = "PERSONNEL" }: { defaultValue?: "ADMIN" | "
         name="role"
       >
         <option value="PERSONNEL">Personel</option>
+        <option value="OBSERVER">Saha Kontrol</option>
         <option value="ADMIN">Yonetici</option>
       </select>
     </div>
   );
+}
+
+function formatRole(role: UserDrawerUser["role"]) {
+  if (role === "ADMIN") {
+    return "Yonetici";
+  }
+
+  if (role === "OBSERVER") {
+    return "Saha Kontrol";
+  }
+
+  return "Personel";
 }
 
 function Field({
