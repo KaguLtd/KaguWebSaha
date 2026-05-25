@@ -10,6 +10,7 @@
     "admin:bootstrap": "node scripts/admin-bootstrap.mjs",
     "deploy:preflight": "node scripts/deploy-preflight.mjs",
     "queue:existing-heic": "node scripts/queue-existing-heic.mjs",
+    "compress:existing-images": "node scripts/compress-existing-images.mjs",
     "prisma:format": "prisma format",
     "prisma:validate": "prisma validate"
   },

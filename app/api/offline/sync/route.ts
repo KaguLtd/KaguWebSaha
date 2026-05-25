@@ -4,6 +4,7 @@ import { requireRole } from "@/lib/auth/session";
 import { getDateOnlyRangeInAppTimeZone, getTodayDateOnly } from "@/lib/dates/today";
 import { recordProjectUpload, scheduleHeicConversionProcessing } from "@/lib/files/heic-conversion-jobs";
 import { saveProjectUpload } from "@/lib/files/storage";
+import { formatSiteDurationMinutes } from "@/lib/format/duration";
 import { parseLatitude, parseLongitude } from "@/lib/location/google-maps";
 import { prisma } from "@/lib/db/prisma";
 
@@ -306,7 +307,7 @@ async function syncLeaveSite(
         title: "Sahadan ayrildi",
         description:
           durationMinutes !== null
-            ? `Sahada gecen sure: ${durationMinutes} dakika`
+            ? `Sahada gecen sure: ${formatSiteDurationMinutes(durationMinutes)}`
             : null,
       },
     });

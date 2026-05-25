@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { requireRole } from "@/lib/auth/session";
 import { getDateOnlyRangeInAppTimeZone, getTodayDateOnly } from "@/lib/dates/today";
+import { formatSiteDurationMinutes } from "@/lib/format/duration";
 import { parseLatitude, parseLongitude } from "@/lib/location/google-maps";
 import { prisma } from "@/lib/db/prisma";
 
@@ -208,7 +209,7 @@ export async function leaveSiteAction(formData: FormData) {
         title: "Sahadan ayrildi",
         description:
           durationMinutes !== null
-            ? `Sahada gecen sure: ${durationMinutes} dakika`
+            ? `Sahada gecen sure: ${formatSiteDurationMinutes(durationMinutes)}`
             : null,
       },
     });

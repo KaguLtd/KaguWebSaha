@@ -10,6 +10,10 @@ import {
   type OfflineItemType,
 } from "@/lib/offline/queue";
 import { createClientId } from "@/lib/offline/client-id";
+import {
+  isCompressibleImage,
+  prepareFilesForUpload,
+} from "@/lib/client/image-compression";
 
 type SyncState = {
   pending: number;
@@ -79,9 +83,36 @@ async function submitOrQueue(
   const note = String(formData.get("note") ?? "");
   const latitude = String(formData.get("latitude") ?? "");
   const longitude = String(formData.get("longitude") ?? "");
-  const files = formData
+  let files = formData
     .getAll("files")
     .filter((value): value is File => value instanceof File && value.size > 0);
+  const hasFiles = files.length > 0;
+
+  if (type === "NOTE" && hasFiles) {
+    const hasVideo = files.some((file) => file.type.toLowerCase().startsWith("video/"));
+    const hasCompressibleImage = files.some(isCompressibleImage);
+
+    if (hasCompressibleImage) {
+      setMessage("Fotoğraflar yükleme için hazırlanıyor...");
+    } else if (hasVideo) {
+      setMessage(
+        "Video dosyaları büyük olabilir, yükleme uzun sürebilir. Bu ekranı kapatmayın.",
+      );
+    }
+
+    files = await prepareFilesForUpload(files);
+    formData.delete("files");
+
+    for (const file of files) {
+      formData.append("files", file);
+    }
+
+    if (hasCompressibleImage && hasVideo) {
+      setMessage(
+        "Video dosyaları büyük olabilir, yükleme uzun sürebilir. Bu ekranı kapatmayın.",
+      );
+    }
+  }
 
   if (!navigator.onLine) {
     await enqueueOfflineItem({
@@ -98,6 +129,10 @@ async function submitOrQueue(
 
   formData.set("clientItemId", createClientId());
   formData.set("type", type);
+
+  if (type === "NOTE" && hasFiles) {
+    setMessage("Yükleniyor...");
+  }
 
   let response: Response;
 
