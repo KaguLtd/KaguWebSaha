@@ -12,6 +12,7 @@ export function CompactFilePreview({ file }: { file: PreviewFile }) {
   const downloadUrl = `/api/files/${file.id}?download=1`;
   const thumbnailUrl = `/api/files/${file.id}/thumbnail`;
   const kind = getPreviewKind(file.mimeType);
+  const typeLabel = getFileTypeLabel(file);
   const hasThumbnail = Boolean(file.thumbnailStoragePath);
 
   return (
@@ -32,11 +33,12 @@ export function CompactFilePreview({ file }: { file: PreviewFile }) {
           <span className="flex h-full w-full items-center justify-center">
             <ImageIcon className="h-5 w-5" aria-hidden="true" />
           </span>
-        ) : kind === "video" ? (
-          <video className="h-full w-full object-cover" muted preload="metadata" src={fileUrl} />
         ) : (
-          <span className="flex h-full w-full items-center justify-center">
-            <FileText className="h-5 w-5" aria-hidden="true" />
+          <span className="flex h-full w-full flex-col items-center justify-center gap-0.5 px-1 text-center">
+            <FileText className="h-4 w-4" aria-hidden="true" />
+            <span className="max-w-full truncate text-[10px] font-semibold uppercase leading-none text-navy/70">
+              {typeLabel}
+            </span>
           </span>
         )}
         <span className="absolute inset-0 hidden items-center justify-center bg-black/30 text-white group-hover:flex">
@@ -131,4 +133,24 @@ function getPreviewKind(mimeType: string): PreviewKind {
   }
 
   return "file";
+}
+
+function getFileTypeLabel(file: PreviewFile) {
+  const extension = file.originalName.split(".").pop()?.trim();
+
+  if (extension && extension !== file.originalName) {
+    return extension.slice(0, 8).toUpperCase();
+  }
+
+  if (file.mimeType === "application/pdf") {
+    return "PDF";
+  }
+
+  if (file.mimeType.startsWith("video/")) {
+    return "VIDEO";
+  }
+
+  const subtype = file.mimeType.split("/")[1];
+
+  return subtype ? subtype.slice(0, 8).toUpperCase() : "DOSYA";
 }

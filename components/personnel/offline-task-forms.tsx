@@ -18,12 +18,14 @@ import {
 type SyncState = {
   pending: number;
   message: string;
+  progress: number | null;
 };
 
 function useOfflineSync() {
   const [state, setState] = useState<SyncState>({
     pending: 0,
     message: "",
+    progress: null,
   });
   const router = useRouter();
 
@@ -39,6 +41,7 @@ function useOfflineSync() {
     const result = await syncOfflineItems();
     setState({
       pending: result.remaining,
+      progress: null,
       message:
         result.synced > 0
           ? `${result.synced} bekleyen kayit gonderildi.`
@@ -75,6 +78,7 @@ async function submitOrQueue(
   type: OfflineItemType,
   form: HTMLFormElement,
   setMessage: (message: string) => void,
+  setProgress: (progress: number | null) => void,
 ) {
   await refreshFormLocation(form);
 
@@ -91,6 +95,7 @@ async function submitOrQueue(
   if (type === "NOTE" && hasFiles) {
     const hasVideo = files.some((file) => file.type.toLowerCase().startsWith("video/"));
     const hasCompressibleImage = files.some(isCompressibleImage);
+    const isPreparingUpload = hasCompressibleImage || hasVideo;
 
     if (hasCompressibleImage) {
       setMessage("Fotoğraflar yükleme için hazırlanıyor...");
@@ -98,6 +103,10 @@ async function submitOrQueue(
       setMessage(
         "Video dosyaları büyük olabilir, yükleme uzun sürebilir. Bu ekranı kapatmayın.",
       );
+    }
+
+    if (isPreparingUpload) {
+      setProgress(8);
     }
 
     files = await prepareFilesForUpload(files);
@@ -111,6 +120,7 @@ async function submitOrQueue(
       setMessage(
         "Video dosyaları büyük olabilir, yükleme uzun sürebilir. Bu ekranı kapatmayın.",
       );
+      setProgress(10);
     }
   }
 
@@ -123,6 +133,7 @@ async function submitOrQueue(
       longitude: longitude || undefined,
       files,
     });
+    setProgress(null);
     setMessage("Internet yok. Islem bekleyen kayitlara alindi.");
     return "queued";
   }
@@ -132,15 +143,23 @@ async function submitOrQueue(
 
   if (type === "NOTE" && hasFiles) {
     setMessage("Yükleniyor...");
+    setProgress(12);
   }
 
-  let response: Response;
+  let response: {
+    ok: boolean;
+    status: number;
+    json: () => Promise<unknown>;
+  };
 
   try {
-    response = await fetch("/api/offline/sync", {
-      method: "POST",
-      body: formData,
-    });
+    response =
+      type === "NOTE" && hasFiles
+        ? await postWithUploadProgress(formData, setProgress)
+        : await fetch("/api/offline/sync", {
+            method: "POST",
+            body: formData,
+          });
   } catch {
     await enqueueOfflineItem({
       type,
@@ -150,6 +169,7 @@ async function submitOrQueue(
       longitude: longitude || undefined,
       files,
     });
+    setProgress(null);
     setMessage("Sunucuya ulasilamadi. Islem bekleyen kayitlara alindi.");
     return "queued";
   }
@@ -159,6 +179,7 @@ async function submitOrQueue(
       const payload = (await response.json().catch(() => null)) as {
         error?: string;
       } | null;
+      setProgress(null);
       setMessage(payload?.error || "Islem kaydedilemedi.");
       return "failed";
     }
@@ -171,12 +192,51 @@ async function submitOrQueue(
       longitude: longitude || undefined,
       files,
     });
+    setProgress(null);
     setMessage("Sunucuya ulasilamadi. Islem bekleyen kayitlara alindi.");
     return "queued";
   }
 
+  setProgress(100);
   setMessage("Islem kaydedildi.");
   return "synced";
+}
+
+function postWithUploadProgress(
+  formData: FormData,
+  setProgress: (progress: number | null) => void,
+) {
+  return new Promise<{
+    ok: boolean;
+    status: number;
+    json: () => Promise<unknown>;
+  }>((resolve, reject) => {
+    const request = new XMLHttpRequest();
+
+    request.open("POST", "/api/offline/sync");
+
+    request.upload.onprogress = (event) => {
+      if (!event.lengthComputable) {
+        return;
+      }
+
+      const uploadProgress = Math.round((event.loaded / event.total) * 80);
+      setProgress(Math.min(92, Math.max(12, 12 + uploadProgress)));
+    };
+
+    request.onerror = () => reject(new Error("Upload failed"));
+    request.ontimeout = () => reject(new Error("Upload timed out"));
+    request.onload = () => {
+      setProgress(96);
+      resolve({
+        ok: request.status >= 200 && request.status < 300,
+        status: request.status,
+        json: async () => JSON.parse(request.responseText || "null"),
+      });
+    };
+
+    request.send(formData);
+  });
 }
 
 function refreshFormLocation(form: HTMLFormElement) {
@@ -236,10 +296,17 @@ export function OfflineArriveForm({
 
     submittingRef.current = true;
     setIsSubmitting(true);
-    setState((current) => ({ ...current, message: "Kaydediliyor..." }));
+    setState((current) => ({
+      ...current,
+      message: "Kaydediliyor...",
+      progress: 6,
+    }));
     try {
-      const result = await submitOrQueue("ARRIVED_SITE", form, (message) =>
-        setState((current) => ({ ...current, message })),
+      const result = await submitOrQueue(
+        "ARRIVED_SITE",
+        form,
+        (message) => setState((current) => ({ ...current, message })),
+        (progress) => setState((current) => ({ ...current, progress })),
       );
       await refreshPending();
 
@@ -263,6 +330,7 @@ export function OfflineArriveForm({
         {children}
       </fieldset>
       <PendingNotice
+        isWorking={isSubmitting}
         state={{
           ...state,
           message: disabled ? disabledMessage || state.message : state.message,
@@ -314,6 +382,7 @@ export function OfflineLeaveForm({
       setState((current) => ({
         ...current,
         message: "Bugün yaptıklarının notunu yaz!",
+        progress: null,
       }));
       return;
     }
@@ -323,16 +392,24 @@ export function OfflineLeaveForm({
       setState((current) => ({
         ...current,
         message: "",
+        progress: null,
       }));
       return;
     }
 
     submittingRef.current = true;
     setIsSubmitting(true);
-    setState((current) => ({ ...current, message: "Kaydediliyor..." }));
+    setState((current) => ({
+      ...current,
+      message: "Kaydediliyor...",
+      progress: 6,
+    }));
     try {
-      const result = await submitOrQueue("LEFT_SITE", form, (message) =>
-        setState((current) => ({ ...current, message })),
+      const result = await submitOrQueue(
+        "LEFT_SITE",
+        form,
+        (message) => setState((current) => ({ ...current, message })),
+        (progress) => setState((current) => ({ ...current, progress })),
       );
       await refreshPending();
 
@@ -373,7 +450,7 @@ export function OfflineLeaveForm({
           )}
         </button>
       </fieldset>
-      <PendingNotice state={state} />
+      <PendingNotice isWorking={isSubmitting} state={state} />
     </form>
   );
 }
@@ -400,10 +477,17 @@ export function OfflineNoteForm({
 
     submittingRef.current = true;
     setIsSubmitting(true);
-    setState((current) => ({ ...current, message: "Kaydediliyor..." }));
+    setState((current) => ({
+      ...current,
+      message: "Kaydediliyor...",
+      progress: 6,
+    }));
     try {
-      const result = await submitOrQueue("NOTE", form, (message) =>
-        setState((current) => ({ ...current, message })),
+      const result = await submitOrQueue(
+        "NOTE",
+        form,
+        (message) => setState((current) => ({ ...current, message })),
+        (progress) => setState((current) => ({ ...current, progress })),
       );
       await refreshPending();
 
@@ -421,19 +505,52 @@ export function OfflineNoteForm({
     <form aria-busy={isSubmitting} className="w-full text-left" onSubmit={handleSubmit}>
       <input name="taskId" type="hidden" value={taskId} />
       <fieldset>{children}</fieldset>
-      <PendingNotice state={state} />
+      <PendingNotice isWorking={isSubmitting} state={state} />
     </form>
   );
 }
 
-function PendingNotice({ state }: { state: SyncState }) {
+function PendingNotice({
+  isWorking = false,
+  state,
+}: {
+  isWorking?: boolean;
+  state: SyncState;
+}) {
   if (!state.message && state.pending === 0) {
     return null;
   }
 
+  const progress =
+    typeof state.progress === "number"
+      ? Math.min(100, Math.max(0, state.progress))
+      : null;
+  const showProgress = isWorking && progress !== null;
+
   return (
-    <div className="mt-4 rounded-md border bg-muted px-3 py-2 text-sm text-muted-foreground">
-      {state.message || `${state.pending} bekleyen kayit var.`}
+    <div
+      aria-valuemax={showProgress ? 100 : undefined}
+      aria-valuemin={showProgress ? 0 : undefined}
+      aria-valuenow={showProgress ? progress : undefined}
+      className="relative mt-4 overflow-hidden rounded-md border bg-muted px-3 py-2 text-sm text-muted-foreground"
+      role={showProgress ? "progressbar" : "status"}
+    >
+      {showProgress ? (
+        <div
+          className="absolute inset-y-0 left-0 bg-primary/10 transition-[width] duration-300 ease-out"
+          style={{ width: `${progress}%` }}
+        >
+          <div className="h-full w-full animate-pulse bg-primary/10" />
+        </div>
+      ) : null}
+      <div className="relative flex items-center justify-between gap-3">
+        <span>{state.message || `${state.pending} bekleyen kayit var.`}</span>
+        {showProgress ? (
+          <span className="shrink-0 tabular-nums text-muted-foreground/80">
+            %{progress}
+          </span>
+        ) : null}
+      </div>
     </div>
   );
 }

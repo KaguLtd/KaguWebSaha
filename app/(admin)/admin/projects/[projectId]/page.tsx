@@ -2,7 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { MapPin } from "lucide-react";
 
-import { FilePreviewCard, FilePreviewGrid } from "@/components/files/file-preview";
+import { CompactFilePreview } from "@/components/files/compact-file-preview";
+import { FilePreviewGrid } from "@/components/files/file-preview";
 import { LocationDescription } from "@/components/location/location-description";
 import { Button } from "@/components/ui/button";
 import { requireAnyRole } from "@/lib/auth/session";
@@ -47,7 +48,9 @@ export default async function ProjectDetailPage({
     notFound();
   }
 
-  const groupedTimeline = groupTimelineByDate(project.timelineEvents);
+  const groupedTimeline = groupTimelineByDate(
+    groupTimelineFileEvents(project.timelineEvents),
+  );
   const mapsUrl =
     project.googleMapsUrl ||
     (project.latitude && project.longitude
@@ -161,18 +164,21 @@ export default async function ProjectDetailPage({
                             <span>{formatDisplayTime(event.createdAt)}</span>
                           </div>
                         </div>
-                        {event.description && event.description !== event.file?.originalName ? (
+                        {event.description &&
+                        event.files.length === 0 ? (
                           <p className="mt-3 rounded-md bg-white px-3 py-2 text-base leading-7 text-navy">
                             <LocationDescription description={event.description} />
                           </p>
-                        ) : !event.file ? (
+                        ) : event.files.length === 0 ? (
                           <p className="mt-3 rounded-md bg-white px-3 py-2 text-sm leading-6 text-muted-foreground">
                             Not girilmedi.
                           </p>
                         ) : null}
-                        {event.file ? (
-                          <div className="mt-3 max-w-sm">
-                            <FilePreviewCard file={event.file} />
+                        {event.files.length > 0 ? (
+                          <div className="mt-3 flex flex-wrap gap-2 rounded-md border border-navy/10 bg-slate-50 p-2">
+                            {event.files.map((file) => (
+                              <CompactFilePreview file={file} key={file.id} />
+                            ))}
                           </div>
                         ) : null}
                       </li>
@@ -213,4 +219,62 @@ function groupTimelineByDate<
     date,
     events: items,
   }));
+}
+
+type TimelineFile = {
+  id: string;
+  mimeType: string;
+  originalName: string;
+  thumbnailStoragePath?: string | null;
+};
+
+type TimelineEventWithFile = {
+  createdAt: Date;
+  dailyTaskId?: string | null;
+  eventType: string;
+  file?: TimelineFile | null;
+  id: string;
+  title: string;
+  userId?: string | null;
+};
+
+function groupTimelineFileEvents<T extends TimelineEventWithFile>(events: T[]) {
+  const grouped: Array<Omit<T, "file"> & { files: TimelineFile[] }> = [];
+
+  for (const event of events) {
+    if (event.eventType !== "FILE_ADDED" || !event.file) {
+      const { file: _file, ...rest } = event;
+      grouped.push({ ...rest, files: [] });
+      continue;
+    }
+
+    const previous = grouped[grouped.length - 1];
+
+    if (previous && shouldGroupFileEvent(previous, event)) {
+      previous.files.push(event.file);
+      continue;
+    }
+
+    const { file: _file, ...rest } = event;
+    grouped.push({ ...rest, files: [event.file] });
+  }
+
+  return grouped;
+}
+
+function shouldGroupFileEvent(
+  previous: TimelineEventWithFile & { files: TimelineFile[] },
+  current: TimelineEventWithFile,
+) {
+  const timeGapMs = Math.abs(
+    previous.createdAt.getTime() - current.createdAt.getTime(),
+  );
+
+  return (
+    previous.eventType === "FILE_ADDED" &&
+    previous.dailyTaskId === current.dailyTaskId &&
+    previous.title === current.title &&
+    previous.userId === current.userId &&
+    timeGapMs <= 120_000
+  );
 }

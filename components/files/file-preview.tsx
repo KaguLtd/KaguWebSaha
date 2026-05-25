@@ -32,6 +32,7 @@ export function FilePreviewCard({ file }: { file: PreviewFile }) {
   const downloadUrl = `/api/files/${file.id}?download=1`;
   const thumbnailUrl = `/api/files/${file.id}/thumbnail`;
   const kind = getPreviewKind(file.mimeType);
+  const typeLabel = getFileTypeLabel(file);
   const hasThumbnail = Boolean(file.thumbnailStoragePath);
 
   return (
@@ -47,6 +48,7 @@ export function FilePreviewCard({ file }: { file: PreviewFile }) {
             hasThumbnail={hasThumbnail}
             kind={kind}
             src={thumbnailUrl}
+            typeLabel={typeLabel}
           />
           <span className="sr-only">Onizle</span>
         </button>
@@ -110,11 +112,13 @@ function PreviewSurface({
   hasThumbnail,
   kind,
   src,
+  typeLabel,
 }: {
   file: PreviewFile;
   hasThumbnail: boolean;
   kind: PreviewKind;
   src: string;
+  typeLabel: string;
 }) {
   if (kind === "image") {
     if (!hasThumbnail) {
@@ -135,24 +139,13 @@ function PreviewSurface({
     );
   }
 
-  if (kind === "pdf") {
-    return (
-      <iframe
-        className="pointer-events-none h-full w-full border-0 bg-white"
-        src={`${src}#toolbar=0&navpanes=0&scrollbar=0`}
-        title={file.originalName}
-      />
-    );
-  }
-
-  if (kind === "video") {
-    return <video className="h-full w-full object-cover" muted preload="metadata" src={src} />;
-  }
-
   return (
-    <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-slate-500">
+    <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-slate-100 px-3 text-center text-slate-500">
       <FileText className="h-8 w-8" aria-hidden="true" />
-      <span className="inline-flex items-center gap-1 text-xs font-medium">
+      <span className="text-sm font-semibold uppercase tracking-wide text-navy/70">
+        {typeLabel}
+      </span>
+      <span className="inline-flex items-center gap-1 text-xs font-medium text-slate-500">
         <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
         Onizle
       </span>
@@ -211,4 +204,24 @@ function getPreviewKind(mimeType: string): PreviewKind {
   }
 
   return "file";
+}
+
+function getFileTypeLabel(file: PreviewFile) {
+  const extension = file.originalName.split(".").pop()?.trim();
+
+  if (extension && extension !== file.originalName) {
+    return extension.slice(0, 8).toUpperCase();
+  }
+
+  if (file.mimeType === "application/pdf") {
+    return "PDF";
+  }
+
+  if (file.mimeType.startsWith("video/")) {
+    return "VIDEO";
+  }
+
+  const subtype = file.mimeType.split("/")[1];
+
+  return subtype ? subtype.slice(0, 8).toUpperCase() : "DOSYA";
 }
