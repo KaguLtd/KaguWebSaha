@@ -9,6 +9,7 @@
     "lint": "next lint",
     "admin:bootstrap": "node scripts/admin-bootstrap.mjs",
     "deploy:preflight": "node scripts/deploy-preflight.mjs",
+    "queue:existing-heic": "node scripts/queue-existing-heic.mjs",
     "prisma:format": "prisma format",
     "prisma:validate": "prisma validate"
   },
