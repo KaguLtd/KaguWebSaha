@@ -40,7 +40,7 @@ const navItems = [
 ];
 
 const observerNavItems = navItems.filter((item) =>
-  ["/admin", "/admin/schedule"].includes(item.href),
+  ["/admin", "/admin/projects", "/admin/schedule"].includes(item.href),
 );
 
 export function AdminShell({
