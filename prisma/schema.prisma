@@ -56,6 +56,20 @@ enum OfflinePendingStatus {
   FAILED
 }
 
+enum HeicConversionStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum ImageThumbnailStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
 model User {
   id             String    @id @default(cuid())
   username       String    @unique @map("username")
@@ -233,26 +247,75 @@ model ProjectTimelineEvent {
 }
 
 model ProjectFile {
-  id               String   @id @default(cuid())
-  projectId        String   @map("project_id")
-  dailyTaskId      String?  @map("daily_task_id")
-  uploadedByUserId String   @map("uploaded_by_user_id")
-  originalName     String   @map("original_name")
-  mimeType         String   @map("mime_type")
-  sizeBytes        BigInt   @map("size_bytes")
-  storagePath      String   @map("storage_path")
-  note             String?
-  createdAt        DateTime @default(now()) @map("created_at")
+  id                   String    @id @default(cuid())
+  projectId            String    @map("project_id")
+  dailyTaskId          String?   @map("daily_task_id")
+  uploadedByUserId     String    @map("uploaded_by_user_id")
+  originalName         String    @map("original_name")
+  mimeType             String    @map("mime_type")
+  sizeBytes            BigInt    @map("size_bytes")
+  storagePath          String    @map("storage_path")
+  thumbnailStoragePath String?   @map("thumbnail_storage_path")
+  thumbnailMimeType    String?   @map("thumbnail_mime_type")
+  thumbnailSizeBytes   BigInt?   @map("thumbnail_size_bytes")
+  thumbnailCreatedAt   DateTime? @map("thumbnail_created_at")
+  note                 String?
+  createdAt            DateTime  @default(now()) @map("created_at")
 
   project        Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
   dailyTask      DailyTask?             @relation(fields: [dailyTaskId], references: [id], onDelete: SetNull)
   uploadedBy     User                   @relation(fields: [uploadedByUserId], references: [id], onDelete: Restrict)
   timelineEvents ProjectTimelineEvent[]
+  thumbnailJobs  ImageThumbnailJob[]
 
   @@index([projectId, createdAt])
   @@index([dailyTaskId])
   @@index([uploadedByUserId])
   @@map("project_files")
+}
+
+model ImageThumbnailJob {
+  id                   String               @id @default(cuid())
+  projectFileId        String               @map("project_file_id")
+  sourceStoragePath    String               @map("source_storage_path")
+  thumbnailStoragePath String               @map("thumbnail_storage_path")
+  status               ImageThumbnailStatus @default(PENDING)
+  attempts             Int                  @default(0)
+  lastError            String?              @map("last_error")
+  createdAt            DateTime             @default(now()) @map("created_at")
+  updatedAt            DateTime             @updatedAt @map("updated_at")
+  completedAt          DateTime?            @map("completed_at")
+
+  projectFile ProjectFile @relation(fields: [projectFileId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([projectFileId])
+  @@map("image_thumbnail_jobs")
+}
+
+model HeicConversionJob {
+  id                String               @id @default(cuid())
+  projectId         String               @map("project_id")
+  dailyTaskId       String?              @map("daily_task_id")
+  uploadedByUserId  String               @map("uploaded_by_user_id")
+  originalName      String               @map("original_name")
+  targetName        String               @map("target_name")
+  tempStoragePath   String               @map("temp_storage_path")
+  targetStoragePath String               @map("target_storage_path")
+  note              String?
+  timelineTitle     String               @map("timeline_title")
+  status            HeicConversionStatus @default(PENDING)
+  attempts          Int                  @default(0)
+  lastError         String?              @map("last_error")
+  createdAt         DateTime             @default(now()) @map("created_at")
+  updatedAt         DateTime             @updatedAt @map("updated_at")
+  completedAt       DateTime?            @map("completed_at")
+
+  @@index([status, createdAt])
+  @@index([projectId])
+  @@index([dailyTaskId])
+  @@index([uploadedByUserId])
+  @@map("heic_conversion_jobs")
 }
 
 model OfflinePendingItem {

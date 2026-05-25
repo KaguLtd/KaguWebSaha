@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import { recordProjectUpload } from "@/lib/files/heic-conversion-jobs";
 import { saveProjectUpload } from "@/lib/files/storage";
 import { parseDateOnly } from "@/lib/dates/calendar";
 import { requireRole } from "@/lib/auth/session";
@@ -99,34 +100,17 @@ export async function createDailyTaskAction(formData: FormData) {
     .filter((value): value is File => value instanceof File && value.size > 0);
 
   for (const file of files) {
-    const savedFile = await saveProjectUpload(file, projectId);
+    const upload = await saveProjectUpload(file, projectId);
 
-    if (!savedFile) {
+    if (!upload) {
       continue;
     }
 
-    const projectFile = await prisma.projectFile.create({
-      data: {
-        projectId,
-        dailyTaskId: dailyTask.id,
-        uploadedByUserId: user.id,
-        originalName: savedFile.originalName,
-        mimeType: savedFile.mimeType,
-        sizeBytes: savedFile.sizeBytes,
-        storagePath: savedFile.storagePath,
-      },
-    });
-
-    await prisma.projectTimelineEvent.create({
-      data: {
-        projectId,
-        dailyTaskId: dailyTask.id,
-        userId: user.id,
-        eventType: "FILE_ADDED",
-        title: "Gunluk goreve dosya eklendi",
-        description: savedFile.originalName,
-        fileId: projectFile.id,
-      },
+    await recordProjectUpload(upload, {
+      projectId,
+      dailyTaskId: dailyTask.id,
+      uploadedByUserId: user.id,
+      timelineTitle: "Gunluk goreve dosya eklendi",
     });
   }
 
@@ -229,34 +213,17 @@ export async function updateDailyTaskAction(formData: FormData) {
     .filter((value): value is File => value instanceof File && value.size > 0);
 
   for (const file of files) {
-    const savedFile = await saveProjectUpload(file, task.projectId);
+    const upload = await saveProjectUpload(file, task.projectId);
 
-    if (!savedFile) {
+    if (!upload) {
       continue;
     }
 
-    const projectFile = await prisma.projectFile.create({
-      data: {
-        projectId: task.projectId,
-        dailyTaskId: task.id,
-        uploadedByUserId: user.id,
-        originalName: savedFile.originalName,
-        mimeType: savedFile.mimeType,
-        sizeBytes: savedFile.sizeBytes,
-        storagePath: savedFile.storagePath,
-      },
-    });
-
-    await prisma.projectTimelineEvent.create({
-      data: {
-        projectId: task.projectId,
-        dailyTaskId: task.id,
-        userId: user.id,
-        eventType: "FILE_ADDED",
-        title: "Gunluk goreve dosya eklendi",
-        description: savedFile.originalName,
-        fileId: projectFile.id,
-      },
+    await recordProjectUpload(upload, {
+      projectId: task.projectId,
+      dailyTaskId: task.id,
+      uploadedByUserId: user.id,
+      timelineTitle: "Gunluk goreve dosya eklendi",
     });
   }
 

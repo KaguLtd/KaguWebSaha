@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import { recordProjectUpload } from "@/lib/files/heic-conversion-jobs";
 import { saveProjectUpload } from "@/lib/files/storage";
 import { parseGoogleMapsCoordinates } from "@/lib/location/google-maps";
 import { verifyPassword } from "@/lib/auth/password";
@@ -123,32 +124,16 @@ export async function createProjectAction(formData: FormData) {
     .filter((value): value is File => value instanceof File && value.size > 0);
 
   for (const file of files) {
-    const savedFile = await saveProjectUpload(file, project.id);
+    const upload = await saveProjectUpload(file, project.id);
 
-    if (!savedFile) {
+    if (!upload) {
       continue;
     }
 
-    const projectFile = await prisma.projectFile.create({
-      data: {
-        projectId: project.id,
-        uploadedByUserId: user.id,
-        originalName: savedFile.originalName,
-        mimeType: savedFile.mimeType,
-        sizeBytes: savedFile.sizeBytes,
-        storagePath: savedFile.storagePath,
-      },
-    });
-
-    await prisma.projectTimelineEvent.create({
-      data: {
-        projectId: project.id,
-        userId: user.id,
-        eventType: "FILE_ADDED",
-        title: "Dosya eklendi",
-        description: savedFile.originalName,
-        fileId: projectFile.id,
-      },
+    await recordProjectUpload(upload, {
+      projectId: project.id,
+      uploadedByUserId: user.id,
+      timelineTitle: "Dosya eklendi",
     });
   }
 
@@ -202,32 +187,16 @@ export async function updateProjectAction(formData: FormData) {
     .filter((value): value is File => value instanceof File && value.size > 0);
 
   for (const file of files) {
-    const savedFile = await saveProjectUpload(file, project.id);
+    const upload = await saveProjectUpload(file, project.id);
 
-    if (!savedFile) {
+    if (!upload) {
       continue;
     }
 
-    const projectFile = await prisma.projectFile.create({
-      data: {
-        projectId: project.id,
-        uploadedByUserId: user.id,
-        originalName: savedFile.originalName,
-        mimeType: savedFile.mimeType,
-        sizeBytes: savedFile.sizeBytes,
-        storagePath: savedFile.storagePath,
-      },
-    });
-
-    await prisma.projectTimelineEvent.create({
-      data: {
-        projectId: project.id,
-        userId: user.id,
-        eventType: "FILE_ADDED",
-        title: "Dosya eklendi",
-        description: savedFile.originalName,
-        fileId: projectFile.id,
-      },
+    await recordProjectUpload(upload, {
+      projectId: project.id,
+      uploadedByUserId: user.id,
+      timelineTitle: "Dosya eklendi",
     });
   }
 

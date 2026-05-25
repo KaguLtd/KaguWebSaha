@@ -3,8 +3,9 @@ import { NextResponse } from "next/server";
 
 import { requireAnyRole } from "@/lib/auth/session";
 import { parseDateOnly } from "@/lib/dates/calendar";
-import { getTodayDateOnly } from "@/lib/dates/today";
+import { getDateOnlyRangeInAppTimeZone, getTodayDateOnly } from "@/lib/dates/today";
 import { prisma } from "@/lib/db/prisma";
+import { recordProjectUpload } from "@/lib/files/heic-conversion-jobs";
 import { saveProjectUpload } from "@/lib/files/storage";
 import { parseLatitude, parseLongitude } from "@/lib/location/google-maps";
 
@@ -58,34 +59,17 @@ async function attachFiles(
     .filter((value): value is File => value instanceof File && value.size > 0);
 
   for (const file of files) {
-    const savedFile = await saveProjectUpload(file, projectId);
+    const upload = await saveProjectUpload(file, projectId);
 
-    if (!savedFile) {
+    if (!upload) {
       continue;
     }
 
-    const projectFile = await prisma.projectFile.create({
-      data: {
-        projectId,
-        dailyTaskId,
-        uploadedByUserId: userId,
-        originalName: savedFile.originalName,
-        mimeType: savedFile.mimeType,
-        sizeBytes: savedFile.sizeBytes,
-        storagePath: savedFile.storagePath,
-      },
-    });
-
-    await prisma.projectTimelineEvent.create({
-      data: {
-        projectId,
-        dailyTaskId,
-        userId,
-        eventType: "FILE_ADDED",
-        title: "Gunluk goreve dosya eklendi",
-        description: savedFile.originalName,
-        fileId: projectFile.id,
-      },
+    await recordProjectUpload(upload, {
+      projectId,
+      dailyTaskId,
+      uploadedByUserId: userId,
+      timelineTitle: "Gunluk goreve dosya eklendi",
     });
   }
 }
@@ -390,8 +374,7 @@ export async function POST(request: Request) {
 
       const { latitude, longitude } = readLocation(formData);
       const now = new Date();
-      const tomorrow = new Date(task.taskDate);
-      tomorrow.setUTCDate(task.taskDate.getUTCDate() + 1);
+      const taskDateRange = getDateOnlyRangeInAppTimeZone(task.taskDate);
 
       const existingVisit = await prisma.taskEvent.findFirst({
         where: {
@@ -399,8 +382,8 @@ export async function POST(request: Request) {
           userId: user.id,
           type: "SITE_VISITED",
           createdAt: {
-            gte: task.taskDate,
-            lt: tomorrow,
+            gte: taskDateRange.start,
+            lt: taskDateRange.end,
           },
         },
         select: {

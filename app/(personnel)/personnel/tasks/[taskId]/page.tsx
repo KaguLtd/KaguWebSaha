@@ -14,7 +14,7 @@ import {
   formatDisplayDateOnly,
   formatDisplayTime,
 } from "@/lib/dates/format";
-import { getTodayDateOnly } from "@/lib/dates/today";
+import { getDateOnlyRangeInAppTimeZone, getTodayDateOnly } from "@/lib/dates/today";
 import { requireRole } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/prisma";
 
@@ -84,8 +84,7 @@ export default async function PersonnelTaskDetailPage({
     notFound();
   }
 
-  const tomorrow = new Date(today);
-  tomorrow.setUTCDate(today.getUTCDate() + 1);
+  const todayRange = getDateOnlyRangeInAppTimeZone(today);
   const todayNoteEvent = await prisma.projectTimelineEvent.findFirst({
     where: {
       projectId: task.projectId,
@@ -93,8 +92,8 @@ export default async function PersonnelTaskDetailPage({
       userId: user.id,
       eventType: "NOTE_ADDED",
       createdAt: {
-        gte: today,
-        lt: tomorrow,
+        gte: todayRange.start,
+        lt: todayRange.end,
       },
     },
     select: {

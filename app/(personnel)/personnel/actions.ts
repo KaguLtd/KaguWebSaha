@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { requireRole } from "@/lib/auth/session";
-import { getTodayDateOnly } from "@/lib/dates/today";
+import { getDateOnlyRangeInAppTimeZone, getTodayDateOnly } from "@/lib/dates/today";
 import { parseLatitude, parseLongitude } from "@/lib/location/google-maps";
 import { prisma } from "@/lib/db/prisma";
 
@@ -156,8 +156,7 @@ export async function leaveSiteAction(formData: FormData) {
     : null;
 
   await prisma.$transaction(async (tx) => {
-    const tomorrow = new Date(task.taskDate);
-    tomorrow.setUTCDate(task.taskDate.getUTCDate() + 1);
+    const taskDateRange = getDateOnlyRangeInAppTimeZone(task.taskDate);
     const todayNote = await tx.projectTimelineEvent.findFirst({
       where: {
         projectId: task.projectId,
@@ -165,8 +164,8 @@ export async function leaveSiteAction(formData: FormData) {
         userId: user.id,
         eventType: "NOTE_ADDED",
         createdAt: {
-          gte: task.taskDate,
-          lt: tomorrow,
+          gte: taskDateRange.start,
+          lt: taskDateRange.end,
         },
       },
       select: {

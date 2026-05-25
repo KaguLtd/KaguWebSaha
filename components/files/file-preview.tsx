@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, FileText, Maximize2, X } from "lucide-react";
+import { Download, FileText, ImageIcon, Maximize2, X } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ export type PreviewFile = {
   id: string;
   mimeType: string;
   originalName: string;
+  thumbnailStoragePath?: string | null;
 };
 
 export function FilePreviewGrid({ files }: { files: PreviewFile[] }) {
@@ -29,7 +30,9 @@ export function FilePreviewCard({ file }: { file: PreviewFile }) {
   const [isOpen, setIsOpen] = useState(false);
   const fileUrl = `/api/files/${file.id}`;
   const downloadUrl = `/api/files/${file.id}?download=1`;
+  const thumbnailUrl = `/api/files/${file.id}/thumbnail`;
   const kind = getPreviewKind(file.mimeType);
+  const hasThumbnail = Boolean(file.thumbnailStoragePath);
 
   return (
     <>
@@ -39,7 +42,12 @@ export function FilePreviewCard({ file }: { file: PreviewFile }) {
           onClick={() => setIsOpen(true)}
           type="button"
         >
-          <PreviewSurface file={file} kind={kind} src={fileUrl} />
+          <PreviewSurface
+            file={file}
+            hasThumbnail={hasThumbnail}
+            kind={kind}
+            src={thumbnailUrl}
+          />
           <span className="sr-only">Onizle</span>
         </button>
         <div className="flex items-center justify-between gap-2 border-t px-3 py-2">
@@ -99,14 +107,25 @@ export function FilePreviewCard({ file }: { file: PreviewFile }) {
 
 function PreviewSurface({
   file,
+  hasThumbnail,
   kind,
   src,
 }: {
   file: PreviewFile;
+  hasThumbnail: boolean;
   kind: PreviewKind;
   src: string;
 }) {
   if (kind === "image") {
+    if (!hasThumbnail) {
+      return (
+        <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-slate-500">
+          <ImageIcon className="h-8 w-8" aria-hidden="true" />
+          <span className="text-xs font-medium">Thumbnail hazirlaniyor</span>
+        </div>
+      );
+    }
+
     return (
       <img
         alt={file.originalName}

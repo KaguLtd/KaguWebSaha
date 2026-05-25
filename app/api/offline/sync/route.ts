@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 
 import { requireRole } from "@/lib/auth/session";
-import { getTodayDateOnly } from "@/lib/dates/today";
+import { getDateOnlyRangeInAppTimeZone, getTodayDateOnly } from "@/lib/dates/today";
+import { recordProjectUpload, scheduleHeicConversionProcessing } from "@/lib/files/heic-conversion-jobs";
 import { saveProjectUpload } from "@/lib/files/storage";
 import { parseLatitude, parseLongitude } from "@/lib/location/google-maps";
 import { prisma } from "@/lib/db/prisma";
 
-type SavedProjectUpload = NonNullable<Awaited<ReturnType<typeof saveProjectUpload>>>;
+type ProjectUpload = NonNullable<Awaited<ReturnType<typeof saveProjectUpload>>>;
 
 function readRequiredText(formData: FormData, name: string) {
   const value = String(formData.get(name) ?? "").trim();
@@ -235,8 +236,7 @@ async function syncLeaveSite(
     ? Math.max(0, Math.round((now.getTime() - task.arrivedAt.getTime()) / 60000))
     : null;
   await prisma.$transaction(async (tx) => {
-    const tomorrow = new Date(task.taskDate);
-    tomorrow.setUTCDate(task.taskDate.getUTCDate() + 1);
+    const taskDateRange = getDateOnlyRangeInAppTimeZone(task.taskDate);
     const todayNote = await tx.projectTimelineEvent.findFirst({
       where: {
         projectId: task.projectId,
@@ -244,8 +244,8 @@ async function syncLeaveSite(
         userId,
         eventType: "NOTE_ADDED",
         createdAt: {
-          gte: task.taskDate,
-          lt: tomorrow,
+          gte: taskDateRange.start,
+          lt: taskDateRange.end,
         },
       },
       select: {
@@ -348,14 +348,14 @@ async function syncNote(
   const files = formData
     .getAll("files")
     .filter((value): value is File => value instanceof File && value.size > 0);
-  const savedFiles: SavedProjectUpload[] = [];
+  const uploads: ProjectUpload[] = [];
   const now = new Date();
 
   for (const file of files) {
-    const savedFile = await saveProjectUpload(file, task.projectId);
+    const upload = await saveProjectUpload(file, task.projectId);
 
-    if (savedFile) {
-      savedFiles.push(savedFile);
+    if (upload) {
+      uploads.push(upload);
     }
   }
 
@@ -372,7 +372,7 @@ async function syncNote(
         payload: {
           taskId,
           note,
-          fileCount: savedFiles.length,
+          fileCount: uploads.length,
         },
       },
       update: {},
@@ -407,31 +407,14 @@ async function syncNote(
       },
     });
 
-    for (const savedFile of savedFiles) {
-      const projectFile = await tx.projectFile.create({
-        data: {
-          projectId: task.projectId,
-          dailyTaskId: task.id,
-          uploadedByUserId: userId,
-          originalName: savedFile.originalName,
-          mimeType: savedFile.mimeType,
-          sizeBytes: savedFile.sizeBytes,
-          storagePath: savedFile.storagePath,
-          note,
-        },
-      });
-
-      await tx.projectTimelineEvent.create({
-        data: {
-          projectId: task.projectId,
-          dailyTaskId: task.id,
-          userId,
-          eventType: "FILE_ADDED",
-          title: "Personel dosya ekledi",
-          description: savedFile.originalName,
-          fileId: projectFile.id,
-        },
-      });
+    for (const upload of uploads) {
+      await recordProjectUpload(upload, {
+        projectId: task.projectId,
+        dailyTaskId: task.id,
+        uploadedByUserId: userId,
+        note,
+        timelineTitle: "Personel dosya ekledi",
+      }, tx);
     }
 
     await tx.offlinePendingItem.update({
@@ -445,4 +428,6 @@ async function syncNote(
       },
     });
   });
+
+  scheduleHeicConversionProcessing();
 }
