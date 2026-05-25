@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 
 import {
@@ -145,7 +145,7 @@ async function submitOrQueue(
 }
 
 function refreshFormLocation(form: HTMLFormElement) {
-  if (!("geolocation" in navigator)) {
+  if (!window.isSecureContext || !("geolocation" in navigator)) {
     return Promise.resolve();
   }
 
@@ -188,16 +188,18 @@ export function OfflineArriveForm({
 }>) {
   const router = useRouter();
   const { state, refreshPending, setState } = useOfflineSync();
+  const submittingRef = useRef(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
 
-    if (isSubmitting) {
+    if (submittingRef.current) {
       return;
     }
 
+    submittingRef.current = true;
     setIsSubmitting(true);
     setState((current) => ({ ...current, message: "Kaydediliyor..." }));
     try {
@@ -210,17 +212,19 @@ export function OfflineArriveForm({
         router.refresh();
       }
     } finally {
+      submittingRef.current = false;
       setIsSubmitting(false);
     }
   }
 
   return (
-    <form className="flex w-full flex-col items-center text-left" onSubmit={handleSubmit}>
+    <form
+      aria-busy={isSubmitting}
+      className="flex w-full flex-col items-center text-left"
+      onSubmit={handleSubmit}
+    >
       <input name="taskId" type="hidden" value={taskId} />
-      <fieldset
-        className="flex w-full flex-col items-center"
-        disabled={isSubmitting || disabled}
-      >
+      <fieldset className="flex w-full flex-col items-center" disabled={disabled}>
         {children}
       </fieldset>
       <PendingNotice
@@ -244,6 +248,7 @@ export function OfflineLeaveForm({
 }>) {
   const router = useRouter();
   const { state, refreshPending, setState } = useOfflineSync();
+  const submittingRef = useRef(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [confirmSeconds, setConfirmSeconds] = useState(0);
   const isConfirming = confirmSeconds > 0;
@@ -266,7 +271,7 @@ export function OfflineLeaveForm({
     event.preventDefault();
     const form = event.currentTarget;
 
-    if (isSubmitting) {
+    if (submittingRef.current) {
       return;
     }
 
@@ -287,6 +292,7 @@ export function OfflineLeaveForm({
       return;
     }
 
+    submittingRef.current = true;
     setIsSubmitting(true);
     setState((current) => ({ ...current, message: "Kaydediliyor..." }));
     try {
@@ -299,14 +305,19 @@ export function OfflineLeaveForm({
         router.refresh();
       }
     } finally {
+      submittingRef.current = false;
       setIsSubmitting(false);
     }
   }
 
   return (
-    <form className="flex w-full flex-col items-center text-left" onSubmit={handleSubmit}>
+    <form
+      aria-busy={isSubmitting}
+      className="flex w-full flex-col items-center text-left"
+      onSubmit={handleSubmit}
+    >
       <input name="taskId" type="hidden" value={taskId} />
-      <fieldset className="flex w-full flex-col items-center" disabled={isSubmitting}>
+      <fieldset className="flex w-full flex-col items-center">
         {children}
         <button
           className={`flex h-44 w-44 flex-col items-center justify-center rounded-full px-6 text-center text-2xl font-semibold leading-tight text-white shadow-lg transition focus:outline-none focus:ring-4 ${
@@ -314,6 +325,7 @@ export function OfflineLeaveForm({
               ? "bg-orange-500 hover:bg-orange-600 focus:ring-orange-200"
               : "bg-red-600 hover:bg-red-700 focus:ring-red-200"
           }`}
+          disabled={isSubmitting}
           type="submit"
         >
           {isConfirming ? (
@@ -340,16 +352,18 @@ export function OfflineNoteForm({
 }>) {
   const router = useRouter();
   const { state, refreshPending, setState } = useOfflineSync();
+  const submittingRef = useRef(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
 
-    if (isSubmitting) {
+    if (submittingRef.current) {
       return;
     }
 
+    submittingRef.current = true;
     setIsSubmitting(true);
     setState((current) => ({ ...current, message: "Kaydediliyor..." }));
     try {
@@ -363,14 +377,15 @@ export function OfflineNoteForm({
         router.refresh();
       }
     } finally {
+      submittingRef.current = false;
       setIsSubmitting(false);
     }
   }
 
   return (
-    <form className="w-full text-left" onSubmit={handleSubmit}>
+    <form aria-busy={isSubmitting} className="w-full text-left" onSubmit={handleSubmit}>
       <input name="taskId" type="hidden" value={taskId} />
-      <fieldset disabled={isSubmitting}>{children}</fieldset>
+      <fieldset>{children}</fieldset>
       <PendingNotice state={state} />
     </form>
   );

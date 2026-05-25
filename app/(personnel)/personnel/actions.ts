@@ -51,6 +51,13 @@ function readLocation(formData: FormData) {
     };
   }
 
+  if (latitude === 0 && longitude === 0) {
+    return {
+      latitude: null,
+      longitude: null,
+    };
+  }
+
   return {
     latitude,
     longitude,
