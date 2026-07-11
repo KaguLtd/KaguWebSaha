@@ -93,6 +93,9 @@ export async function POST(request: Request) {
       const customerId = readRequiredText(formData, "customerId");
       const name = readRequiredText(formData, "name");
       const description = readText(formData, "description");
+      const contactName = readText(formData, "contactName");
+      const contactPhone = readText(formData, "contactPhone");
+      const city = readText(formData, "city");
       const { googleMapsUrl, latitude, location, longitude } = readLocationInput(formData);
 
       const project = await prisma.project.create({
@@ -100,6 +103,9 @@ export async function POST(request: Request) {
           customerId,
           name,
           description: description || null,
+          contactName: contactName || null,
+          contactPhone: contactPhone || null,
+          city: city || null,
           location: location || null,
           googleMapsUrl: googleMapsUrl || null,
           latitude,
@@ -138,6 +144,9 @@ export async function POST(request: Request) {
       const projectId = readRequiredText(formData, "projectId");
       const name = readRequiredText(formData, "name");
       const description = readText(formData, "description");
+      const contactName = readText(formData, "contactName");
+      const contactPhone = readText(formData, "contactPhone");
+      const city = readText(formData, "city");
       const { googleMapsUrl, latitude, location, longitude } = readLocationInput(formData);
 
       const project = await prisma.project.update({
@@ -147,6 +156,9 @@ export async function POST(request: Request) {
         data: {
           name,
           description: description || null,
+          contactName: contactName || null,
+          contactPhone: contactPhone || null,
+          city: city || null,
           location: location || null,
           googleMapsUrl: googleMapsUrl || null,
           latitude,

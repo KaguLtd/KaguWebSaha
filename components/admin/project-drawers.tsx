@@ -1,6 +1,6 @@
 "use client";
 
-import { BriefcaseBusiness, Building2 } from "lucide-react";
+import { BriefcaseBusiness, Building2, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -21,6 +21,9 @@ export type ProjectDrawerCustomer = {
 };
 
 export type ProjectDrawerProject = {
+  city: string;
+  contactName: string;
+  contactPhone: string;
   customerName: string;
   description: string;
   googleMapsUrl: string;
@@ -40,6 +43,7 @@ type ProjectDrawersProps = {
 export function ProjectDrawers({ customers, projects }: ProjectDrawersProps) {
   const [mode, setMode] = useState<DrawerMode>(null);
   const [projectFilter, setProjectFilter] = useState<"active" | "archived">("active");
+  const [projectSearch, setProjectSearch] = useState("");
   const [isPending, setIsPending] = useState(false);
   const [message, setMessage] = useState("");
   const [selectedProjectId, setSelectedProjectId] = useState(projects[0]?.id ?? "");
@@ -48,9 +52,20 @@ export function ProjectDrawers({ customers, projects }: ProjectDrawersProps) {
     () => projects.find((project) => project.id === selectedProjectId),
     [projects, selectedProjectId],
   );
-  const filteredProjects = projects.filter((project) =>
-    projectFilter === "active" ? project.isActive : !project.isActive,
-  );
+  const filteredProjects = useMemo(() => {
+    const normalizedQuery = projectSearch.trim().toLowerCase();
+
+    return projects.filter((project) => {
+      const matchesStatus =
+        projectFilter === "active" ? project.isActive : !project.isActive;
+      const matchesSearch =
+        !normalizedQuery ||
+        project.name.toLowerCase().includes(normalizedQuery) ||
+        project.customerName.toLowerCase().includes(normalizedQuery);
+
+      return matchesStatus && matchesSearch;
+    });
+  }, [projectFilter, projectSearch, projects]);
 
   async function submit(
     formData: FormData,
@@ -121,25 +136,40 @@ export function ProjectDrawers({ customers, projects }: ProjectDrawersProps) {
                 Mevcut proje kayitlari hizli kontrol icin listelenir.
               </p>
             </div>
-            <div className="inline-flex rounded-md border border-navy/10 bg-white p-1">
-              <button
-                className={`rounded px-3 py-1.5 text-sm font-medium transition ${
-                  projectFilter === "active" ? "bg-primary/10 text-primary" : "text-navy hover:bg-primary/5"
-                }`}
-                onClick={() => setProjectFilter("active")}
-                type="button"
-              >
-                Aktif
-              </button>
-              <button
-                className={`rounded px-3 py-1.5 text-sm font-medium transition ${
-                  projectFilter === "archived" ? "bg-primary/10 text-primary" : "text-navy hover:bg-primary/5"
-                }`}
-                onClick={() => setProjectFilter("archived")}
-                type="button"
-              >
-                Arsiv
-              </button>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="relative">
+                <Search
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground"
+                />
+                <input
+                  className="w-full rounded-md border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm text-navy shadow-sm outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary sm:w-56"
+                  onChange={(event) => setProjectSearch(event.target.value)}
+                  placeholder="Proje veya cari ara"
+                  type="search"
+                  value={projectSearch}
+                />
+              </div>
+              <div className="inline-flex rounded-md border border-navy/10 bg-white p-1">
+                <button
+                  className={`rounded px-3 py-1.5 text-sm font-medium transition ${
+                    projectFilter === "active" ? "bg-primary/10 text-primary" : "text-navy hover:bg-primary/5"
+                  }`}
+                  onClick={() => setProjectFilter("active")}
+                  type="button"
+                >
+                  Aktif
+                </button>
+                <button
+                  className={`rounded px-3 py-1.5 text-sm font-medium transition ${
+                    projectFilter === "archived" ? "bg-primary/10 text-primary" : "text-navy hover:bg-primary/5"
+                  }`}
+                  onClick={() => setProjectFilter("archived")}
+                  type="button"
+                >
+                  Arsiv
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -222,7 +252,10 @@ export function ProjectDrawers({ customers, projects }: ProjectDrawersProps) {
           <CustomerSelect customers={customers} />
           <Field label="Proje Ismi" name="name" required />
           <TextArea label="Proje Aciklamasi" name="description" rows={5} />
+          <Field label="Ilgili Kisi" name="contactName" />
+          <Field label="Ilgili Telefon Numarasi" name="contactPhone" type="tel" />
           <Field label="Konum / Google Maps Linki" name="location" />
+          <Field label="Sehir" name="city" />
           <FileInput label="Dosyalar" />
           <Button disabled={isPending || customers.length === 0} type="submit">
             {isPending ? "Kaydediliyor..." : "Kaydet"}
@@ -274,11 +307,14 @@ export function ProjectDrawers({ customers, projects }: ProjectDrawersProps) {
             name="description"
             rows={5}
           />
+          <Field defaultValue={selectedProject?.contactName} label="Ilgili Kisi" name="contactName" />
+          <Field defaultValue={selectedProject?.contactPhone} label="Ilgili Telefon Numarasi" name="contactPhone" type="tel" />
           <Field
             defaultValue={selectedProject?.googleMapsUrl || selectedProject?.location}
             label="Konum / Google Maps Linki"
             name="location"
           />
+          <Field defaultValue={selectedProject?.city} label="Sehir" name="city" />
           <FileInput label="Yeni Dosyalar" />
           <Button disabled={isPending || !selectedProject} type="submit">
             {isPending ? "Kaydediliyor..." : "Kaydet"}
@@ -363,7 +399,7 @@ function Field({
   label: string;
   name: string;
   required?: boolean;
-  type?: "password" | "text" | "url";
+  type?: "password" | "tel" | "text" | "url";
 }) {
   return (
     <div className="flex flex-col gap-2">

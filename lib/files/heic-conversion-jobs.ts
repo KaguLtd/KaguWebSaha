@@ -19,6 +19,7 @@ type ProjectUploadContext = {
   dailyTaskId?: string | null;
   note?: string | null;
   projectId: string;
+  projectVisitId?: string | null;
   timelineTitle: string;
   uploadedByUserId: string;
 };
@@ -35,6 +36,7 @@ export async function recordProjectUpload(
       data: {
         projectId: context.projectId,
         dailyTaskId: context.dailyTaskId,
+        projectVisitId: context.projectVisitId,
         uploadedByUserId: context.uploadedByUserId,
         originalName: upload.originalName,
         mimeType: upload.mimeType,
@@ -48,6 +50,7 @@ export async function recordProjectUpload(
       data: {
         projectId: context.projectId,
         dailyTaskId: context.dailyTaskId,
+        projectVisitId: context.projectVisitId,
         userId: context.uploadedByUserId,
         eventType: "FILE_ADDED",
         title: context.timelineTitle,
@@ -65,6 +68,7 @@ export async function recordProjectUpload(
     data: {
       projectId: context.projectId,
       dailyTaskId: context.dailyTaskId,
+      projectVisitId: context.projectVisitId,
       uploadedByUserId: context.uploadedByUserId,
       originalName: upload.originalName,
       targetName: upload.targetName,
@@ -165,6 +169,7 @@ async function processHeicConversionJob(jobId: string) {
         data: {
           projectId: job.projectId,
           dailyTaskId: job.dailyTaskId,
+          projectVisitId: job.projectVisitId,
           uploadedByUserId: job.uploadedByUserId,
           originalName: job.targetName,
           mimeType: "image/jpeg",
@@ -178,6 +183,7 @@ async function processHeicConversionJob(jobId: string) {
         data: {
           projectId: job.projectId,
           dailyTaskId: job.dailyTaskId,
+          projectVisitId: job.projectVisitId,
           userId: job.uploadedByUserId,
           eventType: "FILE_ADDED",
           title: job.timelineTitle,
@@ -222,6 +228,9 @@ async function processHeicConversionJob(jobId: string) {
 function revalidateConvertedPaths(projectId: string, dailyTaskId: string | null) {
   revalidatePath("/admin");
   revalidatePath("/admin/schedule");
+  revalidatePath("/admin/visits");
+  revalidatePath(`/admin/visits/${projectId}`);
+  revalidatePath("/admin/reports");
   revalidatePath("/personnel");
   revalidatePath(`/admin/projects/${projectId}`);
 

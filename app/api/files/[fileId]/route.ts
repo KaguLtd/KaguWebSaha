@@ -30,15 +30,11 @@ export async function GET(
           dailyTasks: {
             where: {
               taskDate: getTodayDateOnly(),
-              ...(user.role === "OBSERVER"
-                ? {}
-                : {
-                    assignees: {
-                      some: {
-                        userId: user.id,
-                      },
-                    },
-                  }),
+              assignees: {
+                some: {
+                  userId: user.id,
+                },
+              },
             },
             select: {
               id: true,
@@ -54,7 +50,12 @@ export async function GET(
     return NextResponse.json({ error: "Dosya bulunamadi." }, { status: 404 });
   }
 
-  if (user.role !== "ADMIN" && file.project.dailyTasks.length === 0) {
+  const canAccess =
+    user.role === "ADMIN" ||
+    (user.role === "OBSERVER" && file.project.isActive) ||
+    (user.role === "PERSONNEL" && file.project.dailyTasks.length > 0);
+
+  if (!canAccess) {
     return NextResponse.json({ error: "Yetkisiz dosya erisimi." }, { status: 403 });
   }
 

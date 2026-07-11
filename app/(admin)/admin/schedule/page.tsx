@@ -133,12 +133,15 @@ export default async function SchedulePage({
             name: project.name,
           }))}
           tasks={tasks.map((task) => ({
-            assignees: task.assignees.map((assignee) => ({
-              fullName: assignee.user.fullName,
-              id: assignee.userId,
-            })),
+            assignees:
+              user.role === "OBSERVER"
+                ? []
+                : task.assignees.map((assignee) => ({
+                    fullName: assignee.user.fullName,
+                    id: assignee.userId,
+                  })),
             id: task.id,
-            managerNote: task.managerNote ?? "",
+            managerNote: user.role === "OBSERVER" ? "" : task.managerNote ?? "",
             projectId: task.projectId,
             projectName: task.project.name,
             status: task.status,

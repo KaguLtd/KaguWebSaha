@@ -7,6 +7,7 @@ import { PendingSubmitButton } from "@/components/ui/pending-submit-button";
 import { toDateInputValue } from "@/lib/dates/calendar";
 import { formatDisplayDateOnly } from "@/lib/dates/format";
 import { prisma } from "@/lib/db/prisma";
+import { requireRole } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,7 @@ export default async function ScheduleTaskPage({
     month?: string;
   }>;
 }) {
+  await requireRole("ADMIN");
   const { taskId } = await params;
   const query = await searchParams;
   const task = await prisma.dailyTask.findUnique({

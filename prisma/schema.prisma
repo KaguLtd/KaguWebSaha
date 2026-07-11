@@ -87,10 +87,12 @@ model User {
   taskAssignees  DailyTaskAssignee[]
   taskEvents     TaskEvent[]
   timelineEvents ProjectTimelineEvent[]
+  projectVisits  ProjectVisit[]
   uploadedFiles  ProjectFile[]
   projectNotes   ProjectNote[]
   sessions       Session[]
   offlineItems   OfflinePendingItem[]
+  savedReports   SavedReport[]
 
   @@map("users")
 }
@@ -127,6 +129,9 @@ model Project {
   customerId    String   @map("customer_id")
   name          String
   description   String?
+  contactName   String?  @map("contact_name")
+  contactPhone  String?  @map("contact_phone")
+  city          String?
   location      String?
   googleMapsUrl String?  @map("google_maps_url")
   latitude      Decimal? @db.Decimal(10, 7)
@@ -141,10 +146,32 @@ model Project {
   dailyTasks     DailyTask[]
   taskEvents     TaskEvent[]
   timelineEvents ProjectTimelineEvent[]
+  visits         ProjectVisit[]
+  savedReports   SavedReport[]
 
   @@index([customerId])
   @@index([name])
   @@map("projects")
+}
+
+model SavedReport {
+  id              String   @id @default(cuid())
+  reportType      String   @map("report_type")
+  title           String
+  startDate       DateTime @map("start_date") @db.Date
+  endDate         DateTime @map("end_date") @db.Date
+  projectId       String?  @map("project_id")
+  createdByUserId String   @map("created_by_user_id")
+  snapshot        Json
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  createdBy User     @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([createdAt])
+  @@index([projectId])
+  @@index([createdByUserId])
+  @@map("saved_reports")
 }
 
 model ProjectNote {
@@ -224,32 +251,56 @@ model TaskEvent {
 }
 
 model ProjectTimelineEvent {
-  id          String            @id @default(cuid())
-  projectId   String            @map("project_id")
-  dailyTaskId String?           @map("daily_task_id")
-  userId      String?           @map("user_id")
-  eventType   TimelineEventType @map("event_type")
-  title       String
-  description String?
-  fileId      String?           @map("file_id")
-  createdAt   DateTime          @default(now()) @map("created_at")
+  id             String            @id @default(cuid())
+  projectId      String            @map("project_id")
+  dailyTaskId    String?           @map("daily_task_id")
+  projectVisitId String?           @map("project_visit_id")
+  userId         String?           @map("user_id")
+  eventType      TimelineEventType @map("event_type")
+  title          String
+  description    String?
+  fileId         String?           @map("file_id")
+  createdAt      DateTime          @default(now()) @map("created_at")
 
-  project   Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  dailyTask DailyTask?   @relation(fields: [dailyTaskId], references: [id], onDelete: SetNull)
-  user      User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
-  file      ProjectFile? @relation(fields: [fileId], references: [id], onDelete: SetNull)
+  project      Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  dailyTask    DailyTask?    @relation(fields: [dailyTaskId], references: [id], onDelete: SetNull)
+  projectVisit ProjectVisit? @relation(fields: [projectVisitId], references: [id], onDelete: SetNull)
+  user         User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  file         ProjectFile?  @relation(fields: [fileId], references: [id], onDelete: SetNull)
 
   @@index([projectId, createdAt])
   @@index([dailyTaskId])
+  @@index([projectVisitId])
   @@index([userId])
   @@index([fileId])
   @@map("project_timeline_events")
+}
+
+model ProjectVisit {
+  id              String   @id @default(cuid())
+  projectId       String   @map("project_id")
+  visitedByUserId String   @map("visited_by_user_id")
+  note            String?
+  latitude        Decimal? @db.Decimal(10, 7)
+  longitude       Decimal? @db.Decimal(10, 7)
+  visitedAt       DateTime @default(now()) @map("visited_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  project        Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  visitedBy      User                   @relation(fields: [visitedByUserId], references: [id], onDelete: Restrict)
+  files          ProjectFile[]
+  timelineEvents ProjectTimelineEvent[]
+
+  @@index([projectId, visitedAt])
+  @@index([visitedByUserId, visitedAt])
+  @@map("project_visits")
 }
 
 model ProjectFile {
   id                   String    @id @default(cuid())
   projectId            String    @map("project_id")
   dailyTaskId          String?   @map("daily_task_id")
+  projectVisitId       String?   @map("project_visit_id")
   uploadedByUserId     String    @map("uploaded_by_user_id")
   originalName         String    @map("original_name")
   mimeType             String    @map("mime_type")
@@ -264,12 +315,14 @@ model ProjectFile {
 
   project        Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
   dailyTask      DailyTask?             @relation(fields: [dailyTaskId], references: [id], onDelete: SetNull)
+  projectVisit   ProjectVisit?          @relation(fields: [projectVisitId], references: [id], onDelete: SetNull)
   uploadedBy     User                   @relation(fields: [uploadedByUserId], references: [id], onDelete: Restrict)
   timelineEvents ProjectTimelineEvent[]
   thumbnailJobs  ImageThumbnailJob[]
 
   @@index([projectId, createdAt])
   @@index([dailyTaskId])
+  @@index([projectVisitId])
   @@index([uploadedByUserId])
   @@map("project_files")
 }
@@ -297,6 +350,7 @@ model HeicConversionJob {
   id                String               @id @default(cuid())
   projectId         String               @map("project_id")
   dailyTaskId       String?              @map("daily_task_id")
+  projectVisitId    String?              @map("project_visit_id")
   uploadedByUserId  String               @map("uploaded_by_user_id")
   originalName      String               @map("original_name")
   targetName        String               @map("target_name")
@@ -314,6 +368,7 @@ model HeicConversionJob {
   @@index([status, createdAt])
   @@index([projectId])
   @@index([dailyTaskId])
+  @@index([projectVisitId])
   @@index([uploadedByUserId])
   @@map("heic_conversion_jobs")
 }

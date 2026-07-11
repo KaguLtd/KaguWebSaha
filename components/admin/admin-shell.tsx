@@ -1,8 +1,10 @@
 import Link from "next/link";
 import {
+  BarChart3,
   CalendarDays,
   FolderKanban,
   LayoutDashboard,
+  MapPinned,
   PlusCircle,
   UsersRound,
 } from "lucide-react";
@@ -33,6 +35,16 @@ const navItems = [
     icon: CalendarDays,
   },
   {
+    href: "/admin/visits",
+    label: "Ziyaret",
+    icon: MapPinned,
+  },
+  {
+    href: "/admin/reports",
+    label: "Raporlar",
+    icon: BarChart3,
+  },
+  {
     href: "/admin/users",
     label: "Kullanicilar",
     icon: UsersRound,
@@ -40,7 +52,9 @@ const navItems = [
 ];
 
 const observerNavItems = navItems.filter((item) =>
-  ["/admin", "/admin/projects", "/admin/schedule"].includes(item.href),
+  ["/admin/projects", "/admin/schedule", "/admin/visits"].includes(
+    item.href,
+  ),
 );
 
 export function AdminShell({
@@ -54,7 +68,7 @@ export function AdminShell({
   const roleLabel = user.role === "OBSERVER" ? "Saha Kontrol" : "Yonetici";
 
   return (
-    <div className="min-h-screen bg-muted text-navy">
+    <div className="min-h-screen bg-muted pb-24 text-navy md:pb-0">
       <aside className="fixed inset-y-0 left-0 hidden w-64 border-r border-navy/10 bg-muted px-4 py-5 text-navy shadow-xl md:block">
         <Link className="block px-2" href="/admin">
           <span className="text-lg font-semibold">Kagu Saha</span>
@@ -94,26 +108,27 @@ export function AdminShell({
               </Button>
             </form>
           </div>
-          <nav className="flex gap-2 overflow-x-auto border-t bg-muted px-6 py-3 md:hidden">
-            {visibleNavItems.map((item) => {
-              const Icon = item.icon;
-
-              return (
-                <Link
-                  className="inline-flex shrink-0 items-center gap-2 rounded-md border border-navy/10 px-3 py-2 text-sm font-medium text-navy transition hover:border-primary/20 hover:bg-primary/10 hover:text-primary"
-                  href={item.href}
-                  key={item.href}
-                >
-                  <Icon className="h-4 w-4" aria-hidden="true" />
-                  {item.label}
-                </Link>
-              );
-            })}
-          </nav>
         </header>
 
         {children}
       </div>
+
+      <nav className="fixed inset-x-0 bottom-0 flex gap-1 overflow-x-auto border-t border-navy/10 bg-white px-3 py-2 shadow-xl md:hidden">
+        {visibleNavItems.map((item) => {
+          const Icon = item.icon;
+
+          return (
+            <Link
+              className="inline-flex min-w-20 shrink-0 flex-col items-center justify-center gap-1 rounded-md px-2 py-2 text-center text-[11px] font-medium leading-tight text-navy transition hover:bg-primary/10 hover:text-primary"
+              href={item.href}
+              key={item.href}
+            >
+              <Icon className="h-4 w-4" aria-hidden="true" />
+              <span>{item.label}</span>
+            </Link>
+          );
+        })}
+      </nav>
     </div>
   );
 }

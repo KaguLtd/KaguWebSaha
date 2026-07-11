@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Check, ChevronLeft, ChevronRight, Search } from "lucide-react";
 
 import {
   createDailyTaskAction,
@@ -132,7 +133,15 @@ export function ScheduleDrawerCalendar({
         </p>
       ) : null}
 
-      <section className="mt-4 overflow-hidden rounded-lg border bg-white shadow-card">
+      <MobileScheduleList
+        days={days}
+        hideAssignees={currentUserRole === "OBSERVER"}
+        onCreate={(date) => setDrawer({ date, mode: "create" })}
+        onEdit={(taskId) => setDrawer({ mode: "edit", taskId })}
+        tasksByDate={tasksByDate}
+      />
+
+      <section className="mt-4 hidden overflow-hidden rounded-lg border bg-white shadow-card md:block">
         <div className="grid grid-cols-7 border-b border-navy/10 bg-white text-center text-xs font-medium uppercase text-slate-950">
           {weekDays.map((day) => (
             <div className="px-2 py-3" key={day}>
@@ -326,7 +335,8 @@ function EditTaskForm({
       {isObserver ? (
         <div className="rounded-md border border-primary/15 bg-primary/5 p-3 text-sm text-muted-foreground">
           Saha kontrol kullanicisi bu gorevin durumunu veya personel atamalarini
-          degistirmez; sadece ziyaret, not ve dosya kaydi ekler.
+          degistirmez; bu ekrandan yalnizca programa bagli not ve dosya kaydi ekler.
+          Bagimsiz ziyaret kaydi icin Ziyaret modulunu kullanir.
         </div>
       ) : (
         <>
@@ -351,21 +361,6 @@ function EditTaskForm({
       <FileInput label={isObserver ? "Not / dosya ekle" : "Dosya ekle"} />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap gap-3">
-          {isObserver ? (
-            <Button
-              disabled={isPending}
-              onClick={() => {
-                const formData = new FormData();
-                formData.set("taskId", task.id);
-                formData.set("operation", "visit");
-                onSubmit(formData);
-              }}
-              type="button"
-              variant="outline"
-            >
-              {isPending ? "Kaydediliyor..." : "Ziyaret Ettim"}
-            </Button>
-          ) : null}
           <Button disabled={isPending} type="submit">
             {isPending ? "Kaydediliyor..." : "Kaydet"}
           </Button>
@@ -416,25 +411,103 @@ function appendCurrentLocation(formData: FormData) {
 }
 
 function ProjectSelect({ projects }: { projects: ScheduleProject[] }) {
+  const [query, setQuery] = useState("");
+  const [customerFilter, setCustomerFilter] = useState("");
+  const [selectedProjectId, setSelectedProjectId] = useState(projects[0]?.id ?? "");
+  const customers = useMemo(
+    () => Array.from(new Set(projects.map((project) => project.customerName))).sort(),
+    [projects],
+  );
+  const filteredProjects = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+
+    return projects.filter((project) => {
+      const matchesCustomer = !customerFilter || project.customerName === customerFilter;
+      const matchesQuery =
+        !normalizedQuery ||
+        project.name.toLowerCase().includes(normalizedQuery) ||
+        project.customerName.toLowerCase().includes(normalizedQuery);
+
+      return matchesCustomer && matchesQuery;
+    });
+  }, [customerFilter, projects, query]);
+  const selectedProject = projects.find((project) => project.id === selectedProjectId);
+
   return (
     <div className="flex flex-col gap-2">
       <label className="text-sm font-medium text-navy" htmlFor="projectId">
         Proje
       </label>
-      <select
-        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-navy shadow-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary"
-        disabled={projects.length === 0}
-        id="projectId"
-        name="projectId"
-        required
-      >
-        <option value="">Proje sec</option>
-        {projects.map((project) => (
-          <option key={project.id} value={project.id}>
-            {project.name} - {project.customerName}
-          </option>
-        ))}
-      </select>
+      <div className="grid gap-2 sm:grid-cols-[1fr_180px]">
+        <div className="relative">
+          <Search
+            aria-hidden="true"
+            className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground"
+          />
+          <input
+            className="w-full rounded-md border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm text-navy shadow-sm outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary"
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Proje veya cari ara"
+            type="search"
+            value={query}
+          />
+        </div>
+        <select
+          className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-navy shadow-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary"
+          onChange={(event) => setCustomerFilter(event.target.value)}
+          value={customerFilter}
+        >
+          <option value="">Tum cariler</option>
+          {customers.map((customerName) => (
+            <option key={customerName} value={customerName}>
+              {customerName}
+            </option>
+          ))}
+        </select>
+      </div>
+      <input name="projectId" type="hidden" value={selectedProjectId} />
+      {selectedProject ? (
+        <p className="rounded-md bg-primary/10 px-3 py-2 text-xs text-navy">
+          <span className="font-semibold">Secili:</span> {selectedProject.name} · {selectedProject.customerName}
+        </p>
+      ) : null}
+      <div className="flex items-center justify-between px-1 text-xs text-muted-foreground">
+        <span>{filteredProjects.length} proje bulundu</span>
+        {filteredProjects.length > 0 ? (
+          <span>Listeyi kaydirarak tumunu gorebilirsiniz</span>
+        ) : null}
+      </div>
+      <div className="h-64 divide-y divide-navy/10 overflow-y-auto overscroll-contain rounded-md border border-navy/10 bg-white">
+        {filteredProjects.map((project) => {
+          const isSelected = selectedProjectId === project.id;
+          return (
+            <button
+              className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition ${
+                isSelected
+                  ? "bg-primary/10"
+                  : "bg-white hover:bg-primary/5"
+              }`}
+              key={project.id}
+              onClick={() => setSelectedProjectId(project.id)}
+              type="button"
+            >
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-medium text-navy">{project.name}</span>
+                <span className="block truncate text-xs text-muted-foreground">{project.customerName}</span>
+              </span>
+              {isSelected ? <Check className="h-4 w-4 shrink-0 text-primary" /> : null}
+            </button>
+          );
+        })}
+      </div>
+      {!selectedProjectId && filteredProjects.length > 0 ? (
+        <p className="text-xs text-muted-foreground">Eklemek istediginiz projeye dokunun.</p>
+      ) : null}
+      {projects.length > 0 && filteredProjects.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          Bu arama ve cari filtresiyle eslesen proje yok.
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -537,4 +610,88 @@ function formatDateOnly(value: string) {
   const [year, month, day] = value.split("-");
 
   return `${day}/${month}/${year}`;
+}
+
+function MobileScheduleList({
+  days,
+  hideAssignees,
+  onCreate,
+  onEdit,
+  tasksByDate,
+}: {
+  days: ScheduleDay[];
+  hideAssignees: boolean;
+  onCreate: (date: string) => void;
+  onEdit: (taskId: string) => void;
+  tasksByDate: Map<string, ScheduleTask[]>;
+}) {
+  const [weekIndex, setWeekIndex] = useState(() => {
+    const today = new Date();
+    const localDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    const todayIndex = days.findIndex((day) => day.date === localDate);
+    const firstMonthIndex = days.findIndex((day) => day.isCurrentMonth);
+    return Math.floor((todayIndex >= 0 ? todayIndex : Math.max(firstMonthIndex, 0)) / 7);
+  });
+  const week = days.slice(weekIndex * 7, weekIndex * 7 + 7);
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const currentWeek = days.slice(weekIndex * 7, weekIndex * 7 + 7);
+    return currentWeek.find((day) => day.isCurrentMonth)?.date ?? currentWeek[0]?.date ?? "";
+  });
+  const selectedDay = days.find((day) => day.date === selectedDate) ?? week[0];
+  const selectedTasks = selectedDay ? tasksByDate.get(selectedDay.date) ?? [] : [];
+
+  function changeWeek(nextIndex: number) {
+    const bounded = Math.max(0, Math.min(Math.ceil(days.length / 7) - 1, nextIndex));
+    const nextWeek = days.slice(bounded * 7, bounded * 7 + 7);
+    setWeekIndex(bounded);
+    setSelectedDate(nextWeek.find((day) => day.isCurrentMonth)?.date ?? nextWeek[0]?.date ?? "");
+  }
+
+  return (
+    <section className="mt-4 overflow-hidden rounded-lg border border-navy/10 bg-white shadow-card md:hidden">
+      <div className="flex items-center justify-between border-b border-navy/10 bg-primary/5 p-2">
+        <Button disabled={weekIndex === 0} onClick={() => changeWeek(weekIndex - 1)} size="icon" type="button" variant="outline">
+          <ChevronLeft className="h-4 w-4" /><span className="sr-only">Onceki hafta</span>
+        </Button>
+        <p className="text-sm font-semibold text-navy">Haftalik Program</p>
+        <Button disabled={(weekIndex + 1) * 7 >= days.length} onClick={() => changeWeek(weekIndex + 1)} size="icon" type="button" variant="outline">
+          <ChevronRight className="h-4 w-4" /><span className="sr-only">Sonraki hafta</span>
+        </Button>
+      </div>
+      <div className="grid grid-cols-7 border-b border-navy/10">
+        {week.map((day, index) => {
+          const count = (tasksByDate.get(day.date) ?? []).length;
+          const isSelected = day.date === selectedDate;
+          return (
+            <button
+              className={`min-w-0 border-r px-1 py-2 text-center transition last:border-r-0 ${isSelected ? "bg-orange-100 text-orange-950 ring-2 ring-inset ring-orange-300" : day.isCurrentMonth ? "bg-white text-navy" : "bg-slate-50 text-muted-foreground"}`}
+              key={day.date}
+              onClick={() => setSelectedDate(day.date)}
+              type="button"
+            >
+              <span className="block text-[10px] font-medium uppercase">{weekDays[index]}</span>
+              <span className="mt-1 block text-base font-semibold">{day.dayNumber}</span>
+              <span className={`mx-auto mt-1 block h-1.5 w-1.5 rounded-full ${count ? (isSelected ? "bg-orange-600" : "bg-primary") : "bg-transparent"}`} />
+            </button>
+          );
+        })}
+      </div>
+      {selectedDay ? (
+        <div className="p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div><p className="text-sm font-semibold">{formatDateOnly(selectedDay.date)}</p><p className="text-xs text-muted-foreground">{selectedTasks.length} gorev</p></div>
+            <Button onClick={() => onCreate(selectedDay.date)} size="sm" type="button">Gorev ekle</Button>
+          </div>
+          <div className="mt-3 flex flex-col gap-2">
+            {selectedTasks.length ? selectedTasks.map((task) => (
+              <button className="rounded-md border border-primary/20 bg-primary/10 px-3 py-3 text-left text-sm font-medium" key={task.id} onClick={() => onEdit(task.id)} type="button">
+                <span className="block">{task.projectName}</span>
+                <span className="mt-1 block text-xs font-normal text-muted-foreground">{hideAssignees ? "Atama bilgisi gizli" : task.assignees.length ? task.assignees.map((assignee) => assignee.fullName).join(", ") : "Atama yok"}</span>
+              </button>
+            )) : <p className="rounded-md border border-dashed border-navy/15 p-4 text-center text-sm text-muted-foreground">Bu gun icin gorev yok.</p>}
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
 }

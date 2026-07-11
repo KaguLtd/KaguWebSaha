@@ -1,7 +1,9 @@
 import Link from "next/link";
-import { Search } from "lucide-react";
+import type { Prisma } from "@prisma/client";
+import { History, Search } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { QuickProjectNote } from "@/components/admin/quick-project-note";
 import { requireAnyRole } from "@/lib/auth/session";
 import { formatDisplayDate } from "@/lib/dates/format";
 import { prisma } from "@/lib/db/prisma";
@@ -12,49 +14,66 @@ export default async function ProjectsPage({
   searchParams,
 }: {
   searchParams?: Promise<{
+    customerId?: string;
     q?: string;
+    status?: string;
   }>;
 }) {
   const user = await requireAnyRole(["ADMIN", "OBSERVER"]);
   const params = await searchParams;
   const query = String(params?.q ?? "").trim();
-  const projects = await prisma.project.findMany({
-    where: {
-      isActive: true,
+  const status =
+    user.role === "ADMIN" && ["active", "archived", "all"].includes(params?.status ?? "")
+      ? String(params?.status)
+      : "active";
+  const customerId = String(params?.customerId ?? "").trim();
+  const where: Prisma.ProjectWhereInput = {
+    ...(status === "active" ? { isActive: true } : {}),
+    ...(status === "archived" ? { isActive: false } : {}),
+    ...(customerId ? { customerId } : {}),
       ...(query
         ? {
-          OR: [
-            {
-              name: {
-                contains: query,
-                mode: "insensitive",
-              },
-            },
-            {
-              customer: {
+            OR: [
+              {
                 name: {
                   contains: query,
                   mode: "insensitive",
                 },
               },
-            },
-          ],
-        }
+              {
+                customer: {
+                  name: {
+                    contains: query,
+                    mode: "insensitive",
+                  },
+                },
+              },
+            ],
+          }
         : {}),
-    },
-    include: {
-      customer: true,
-      _count: {
-        select: {
-          files: true,
-          timelineEvents: true,
+  };
+  const [customers, projects] = await Promise.all([
+    prisma.customer.findMany({
+      orderBy: {
+        name: "asc",
+      },
+    }),
+    prisma.project.findMany({
+      where,
+      include: {
+        customer: true,
+        _count: {
+          select: {
+            files: true,
+            timelineEvents: true,
+          },
         },
       },
-    },
-    orderBy: {
-      updatedAt: "desc",
-    },
-  });
+      orderBy: {
+        updatedAt: "desc",
+      },
+    }),
+  ]);
 
   return (
     <main className="p-6 text-navy">
@@ -73,8 +92,8 @@ export default async function ProjectsPage({
           ) : null}
         </div>
 
-        <form className="mt-6 flex max-w-lg gap-2">
-          <div className="relative flex-1">
+        <form className="mt-6 grid gap-3 rounded-lg border border-navy/10 bg-white p-4 shadow-card md:grid-cols-[1.5fr_1fr_1fr_auto]">
+          <div className="relative">
             <Search
               aria-hidden="true"
               className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground"
@@ -87,8 +106,31 @@ export default async function ProjectsPage({
               type="search"
             />
           </div>
+          <select
+            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-navy shadow-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary"
+            defaultValue={customerId}
+            name="customerId"
+          >
+            <option value="">Tum cariler</option>
+            {customers.map((customer) => (
+              <option key={customer.id} value={customer.id}>
+                {customer.name}
+              </option>
+            ))}
+          </select>
+          {user.role === "ADMIN" ? (
+            <select
+              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-navy shadow-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary"
+              defaultValue={status}
+              name="status"
+            >
+              <option value="active">Aktif projeler</option>
+              <option value="archived">Arsiv projeler</option>
+              <option value="all">Tum projeler</option>
+            </select>
+          ) : null}
           <Button type="submit" variant="outline">
-            Ara
+            Filtrele
           </Button>
         </form>
 
@@ -101,7 +143,40 @@ export default async function ProjectsPage({
           </section>
         ) : (
           <section className="mt-8 overflow-hidden rounded-lg border border-navy/10 bg-white shadow-card">
-            <div className="overflow-x-auto">
+            <div className="divide-y divide-navy/10 md:hidden">
+              {projects.map((project) => (
+                <article
+                  className={`px-3 py-3 ${
+                    project.isActive ? "bg-white" : "bg-slate-50 opacity-70"
+                  }`}
+                  key={project.id}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <Link
+                        className="block truncate text-sm font-semibold text-primary underline-offset-2 hover:underline"
+                        href={`/admin/projects/${project.id}`}
+                      >
+                        {project.name}
+                      </Link>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {project.customer.name}{project.isActive ? "" : " · Arsiv"}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <Button asChild className="h-8 w-8 p-0" size="icon" title="Gecmisi Incele" variant="outline">
+                        <Link aria-label={`${project.name} gecmisini incele`} href={`/admin/projects/${project.id}`}>
+                          <History aria-hidden="true" className="h-4 w-4" />
+                          <span className="sr-only">Gecmisi Incele</span>
+                        </Link>
+                      </Button>
+                      <QuickProjectNote iconOnly projectId={project.id} projectName={project.name} />
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+            <div className="hidden overflow-x-auto md:block">
               <table className="w-full min-w-[860px] border-collapse text-left text-sm">
                 <thead className="border-b border-navy/10 bg-white text-xs uppercase text-slate-950">
                   <tr>
@@ -117,7 +192,15 @@ export default async function ProjectsPage({
                   {projects.map((project) => (
                     <tr className="transition hover:bg-primary/5" key={project.id}>
                       <td className="px-4 py-4">
-                        <p className="font-medium text-navy">{project.name}</p>
+                        <Link
+                          className="font-medium text-primary underline-offset-2 hover:underline"
+                          href={`/admin/projects/${project.id}`}
+                        >
+                          {project.name}
+                        </Link>
+                        {!project.isActive ? (
+                          <p className="mt-1 text-xs text-muted-foreground">Arsiv</p>
+                        ) : null}
                       </td>
                       <td className="px-4 py-4">{project.customer.name}</td>
                       <td className="whitespace-nowrap px-4 py-4">
@@ -128,11 +211,12 @@ export default async function ProjectsPage({
                         {project._count.timelineEvents} kayit
                       </td>
                       <td className="px-4 py-4">
-                        <Button asChild size="sm" variant="outline">
-                          <Link href={`/admin/projects/${project.id}`}>
-                            Gecmisi Incele
-                          </Link>
-                        </Button>
+                        <div className="flex flex-wrap gap-2">
+                          <Button asChild size="sm" variant="outline">
+                            <Link href={`/admin/projects/${project.id}`}>Gecmisi Incele</Link>
+                          </Button>
+                          <QuickProjectNote projectId={project.id} projectName={project.name} />
+                        </div>
                       </td>
                     </tr>
                   ))}

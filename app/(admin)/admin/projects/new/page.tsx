@@ -39,6 +39,9 @@ export default async function NewProjectPage() {
             name: customer.name,
           }))}
           projects={projects.map((project) => ({
+            city: project.city ?? "",
+            contactName: project.contactName ?? "",
+            contactPhone: project.contactPhone ?? "",
             customerName: project.customer.name,
             description: project.description ?? "",
             googleMapsUrl: project.googleMapsUrl ?? "",
