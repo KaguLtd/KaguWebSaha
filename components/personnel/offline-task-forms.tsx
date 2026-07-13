@@ -6,10 +6,10 @@ import { useRouter } from "next/navigation";
 import {
   enqueueOfflineItem,
   listOfflineItems,
+  replaceOfflineItemFiles,
   syncOfflineItems,
   type OfflineItemType,
 } from "@/lib/offline/queue";
-import { createClientId } from "@/lib/offline/client-id";
 import {
   isCompressibleImage,
   prepareFilesForUpload,
@@ -30,7 +30,7 @@ function useOfflineSync() {
   const router = useRouter();
 
   async function refreshPending() {
-    const items = await listOfflineItems();
+    const items = await listOfflineItems(["PERSONNEL"]);
     setState((current) => ({
       ...current,
       pending: items.length,
@@ -38,12 +38,23 @@ function useOfflineSync() {
   }
 
   async function syncNow() {
-    const result = await syncOfflineItems();
+    const result = await syncOfflineItems({
+      kinds: ["PERSONNEL"],
+      onProgress: ({ current, progress, total }) => {
+        setState((currentState) => ({
+          ...currentState,
+          message: `${current}/${total} kayıt yükleniyor...`,
+          progress,
+        }));
+      },
+    });
     setState({
       pending: result.remaining,
       progress: null,
       message:
-        result.synced > 0
+        result.error && result.remaining > 0
+          ? result.error
+          : result.synced > 0
           ? `${result.synced} bekleyen kayit gonderildi.`
           : result.remaining > 0
             ? `${result.remaining} kayit bekliyor.`
@@ -91,6 +102,24 @@ async function submitOrQueue(
     .getAll("files")
     .filter((value): value is File => value instanceof File && value.size > 0);
   const hasFiles = files.length > 0;
+  let queuedItem;
+
+  try {
+    queuedItem = await enqueueOfflineItem({
+      type,
+      taskId,
+      note: note || undefined,
+      latitude: latitude || undefined,
+      longitude: longitude || undefined,
+      files,
+    });
+  } catch {
+    setProgress(null);
+    setMessage(
+      "Kayıt cihazdaki güvenli kuyruğa alınamadı. Depolama alanını kontrol edip tekrar deneyin.",
+    );
+    return "failed";
+  }
 
   if (type === "NOTE" && hasFiles) {
     const hasVideo = files.some((file) => file.type.toLowerCase().startsWith("video/"));
@@ -101,7 +130,7 @@ async function submitOrQueue(
       setMessage("Fotoğraflar yükleme için hazırlanıyor...");
     } else if (hasVideo) {
       setMessage(
-        "Video dosyaları büyük olabilir, yükleme uzun sürebilir. Bu ekranı kapatmayın.",
+        "Video yüklemesi uzun sürebilir; ekran kapansa da tekrar açıldığında devam eder.",
       );
     }
 
@@ -110,133 +139,56 @@ async function submitOrQueue(
     }
 
     files = await prepareFilesForUpload(files);
-    formData.delete("files");
-
-    for (const file of files) {
-      formData.append("files", file);
-    }
+    await replaceOfflineItemFiles(queuedItem.id, files);
 
     if (hasCompressibleImage && hasVideo) {
       setMessage(
-        "Video dosyaları büyük olabilir, yükleme uzun sürebilir. Bu ekranı kapatmayın.",
+        "Video yüklemesi uzun sürebilir; ekran kapansa da tekrar açıldığında devam eder.",
       );
       setProgress(10);
     }
   }
 
   if (!navigator.onLine) {
-    await enqueueOfflineItem({
-      type,
-      taskId,
-      note: note || undefined,
-      latitude: latitude || undefined,
-      longitude: longitude || undefined,
-      files,
-    });
     setProgress(null);
     setMessage("Internet yok. Islem bekleyen kayitlara alindi.");
     return "queued";
   }
-
-  formData.set("clientItemId", createClientId());
-  formData.set("type", type);
 
   if (type === "NOTE" && hasFiles) {
     setMessage("Yükleniyor...");
     setProgress(12);
   }
 
-  let response: {
-    ok: boolean;
-    status: number;
-    json: () => Promise<unknown>;
-  };
+  const result = await syncOfflineItems({
+    kinds: ["PERSONNEL"],
+    onProgress: ({ current, progress, total }) => {
+      setProgress(progress);
+      setMessage(`${current}/${total} kayıt yükleniyor...`);
+    },
+  });
 
-  try {
-    response =
-      type === "NOTE" && hasFiles
-        ? await postWithUploadProgress(formData, setProgress)
-        : await fetch("/api/offline/sync", {
-            method: "POST",
-            body: formData,
-          });
-  } catch {
-    await enqueueOfflineItem({
-      type,
-      taskId,
-      note: note || undefined,
-      latitude: latitude || undefined,
-      longitude: longitude || undefined,
-      files,
-    });
+  if (result.failedIds.includes(queuedItem.id)) {
     setProgress(null);
-    setMessage("Sunucuya ulasilamadi. Islem bekleyen kayitlara alindi.");
-    return "queued";
+    setMessage(result.error || "İşlem kaydedilemedi.");
+    return "failed";
   }
 
-  if (!response.ok) {
-    if (response.status >= 400 && response.status < 500) {
-      const payload = (await response.json().catch(() => null)) as {
-        error?: string;
-      } | null;
-      setProgress(null);
-      setMessage(payload?.error || "Islem kaydedilemedi.");
-      return "failed";
-    }
+  const isStillQueued = (await listOfflineItems(["PERSONNEL"])).some(
+    (item) => item.id === queuedItem.id,
+  );
 
-    await enqueueOfflineItem({
-      type,
-      taskId,
-      note: note || undefined,
-      latitude: latitude || undefined,
-      longitude: longitude || undefined,
-      files,
-    });
+  if (isStillQueued) {
     setProgress(null);
-    setMessage("Sunucuya ulasilamadi. Islem bekleyen kayitlara alindi.");
+    setMessage(
+      result.error || "Bağlantı kesildi. Kayıt cihazda saklandı ve tekrar denenecek.",
+    );
     return "queued";
   }
 
   setProgress(100);
   setMessage("Islem kaydedildi.");
   return "synced";
-}
-
-function postWithUploadProgress(
-  formData: FormData,
-  setProgress: (progress: number | null) => void,
-) {
-  return new Promise<{
-    ok: boolean;
-    status: number;
-    json: () => Promise<unknown>;
-  }>((resolve, reject) => {
-    const request = new XMLHttpRequest();
-
-    request.open("POST", "/api/offline/sync");
-
-    request.upload.onprogress = (event) => {
-      if (!event.lengthComputable) {
-        return;
-      }
-
-      const uploadProgress = Math.round((event.loaded / event.total) * 80);
-      setProgress(Math.min(92, Math.max(12, 12 + uploadProgress)));
-    };
-
-    request.onerror = () => reject(new Error("Upload failed"));
-    request.ontimeout = () => reject(new Error("Upload timed out"));
-    request.onload = () => {
-      setProgress(96);
-      resolve({
-        ok: request.status >= 200 && request.status < 300,
-        status: request.status,
-        json: async () => JSON.parse(request.responseText || "null"),
-      });
-    };
-
-    request.send(formData);
-  });
 }
 
 function refreshFormLocation(form: HTMLFormElement) {
@@ -537,10 +489,10 @@ function PendingNotice({
     >
       {showProgress ? (
         <div
-          className="absolute inset-y-0 left-0 bg-primary/10 transition-[width] duration-300 ease-out"
+          className="absolute inset-y-0 left-0 overflow-hidden bg-primary/10 transition-[width] duration-300 ease-out"
           style={{ width: `${progress}%` }}
         >
-          <div className="h-full w-full animate-pulse bg-primary/10" />
+          <div className="h-full w-full animate-pulse bg-gradient-to-r from-primary/5 via-primary/25 to-primary/10" />
         </div>
       ) : null}
       <div className="relative flex items-center justify-between gap-3">

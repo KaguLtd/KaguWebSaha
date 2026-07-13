@@ -133,8 +133,8 @@ export default async function AdminPage() {
           </p>
         </div>
 
-        <YesterdaySection tasksPromise={yesterdayTasksPromise} yesterday={yesterday} />
         <TaskTable tasksPromise={tasksPromise} />
+        <YesterdaySection tasksPromise={yesterdayTasksPromise} yesterday={yesterday} />
       </div>
     </main>
   );

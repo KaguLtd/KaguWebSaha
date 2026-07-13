@@ -3,8 +3,12 @@ import { NextResponse } from "next/server";
 
 import { requireAnyRole } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/prisma";
-import { recordProjectUpload } from "@/lib/files/heic-conversion-jobs";
-import { saveProjectUpload } from "@/lib/files/storage";
+import {
+  recordProjectUpload,
+  scheduleHeicConversionProcessing,
+} from "@/lib/files/heic-conversion-jobs";
+import { scheduleImageThumbnailProcessing } from "@/lib/files/image-thumbnail-jobs";
+import { saveProjectUpload, type ProjectUploadResult } from "@/lib/files/storage";
 import { parseLatitude, parseLongitude } from "@/lib/location/google-maps";
 
 function readText(formData: FormData, name: string) {
@@ -103,7 +107,23 @@ export async function POST(request: Request) {
     const formData = await request.formData();
     const operation = readRequiredText(formData, "operation");
     const projectId = readRequiredText(formData, "projectId");
+    const clientItemId = readText(formData, "clientItemId");
     const project = await requireVisitProject(projectId, userRole);
+
+    if (operation === "file" && clientItemId) {
+      const existing = await prisma.offlinePendingItem.findUnique({
+        where: {
+          clientItemId,
+        },
+        select: {
+          status: true,
+        },
+      });
+
+      if (existing?.status === "SYNCED") {
+        return NextResponse.json({ ok: true, duplicate: true });
+      }
+    }
 
     if (operation === "visit") {
       const note = readText(formData, "note");
@@ -236,21 +256,69 @@ export async function POST(request: Request) {
         throw new Error("Yuklenecek dosya secilmedi.");
       }
 
+      const uploads: ProjectUploadResult[] = [];
+
       for (const file of files) {
         const upload = await saveProjectUpload(file, project.id);
 
-        if (!upload) {
-          continue;
+        if (upload) {
+          uploads.push(upload);
+        }
+      }
+
+      await prisma.$transaction(async (tx) => {
+        if (clientItemId) {
+          await tx.offlinePendingItem.upsert({
+            where: {
+              clientItemId,
+            },
+            create: {
+              userId: user.id,
+              clientItemId,
+              type: "FILE",
+              status: "PENDING",
+              payload: {
+                projectId: project.id,
+                projectVisitId: visit?.id ?? null,
+                fileCount: uploads.length,
+              },
+            },
+            update: {},
+          });
         }
 
-        await recordProjectUpload(upload, {
-          projectId: project.id,
-          projectVisitId: visit?.id ?? null,
-          uploadedByUserId: user.id,
-          note: note || null,
-          timelineTitle: visit ? "Ziyaret dosyasi eklendi" : "Proje dosyasi eklendi",
-        });
-      }
+        for (const upload of uploads) {
+          await recordProjectUpload(
+            upload,
+            {
+              projectId: project.id,
+              projectVisitId: visit?.id ?? null,
+              uploadedByUserId: user.id,
+              note: note || null,
+              timelineTitle: visit
+                ? "Ziyaret dosyasi eklendi"
+                : "Proje dosyasi eklendi",
+            },
+            tx,
+          );
+        }
+
+        if (clientItemId) {
+          await tx.offlinePendingItem.update({
+            where: {
+              clientItemId,
+            },
+            data: {
+              status: "SYNCED",
+              syncedAt: new Date(),
+              lastError: null,
+            },
+          });
+        }
+      });
+
+      scheduleHeicConversionProcessing();
+      scheduleImageThumbnailProcessing();
 
       revalidateVisitPaths(project.id);
 
@@ -300,9 +368,23 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ error: "Gecersiz islem." }, { status: 400 });
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Islem kaydedilemedi.";
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Islem kaydedilemedi." },
-      { status: 400 },
+      { error: message },
+      { status: isVisitRequestError(message) ? 400 : 500 },
     );
   }
+}
+
+function isVisitRequestError(message: string) {
+  return [
+    " is required",
+    "Proje bulunamadi.",
+    "arsiv projeye ziyaret kaydi ekleyemez.",
+    "Ziyaret kaydi bulunamadi.",
+    "Yuklenecek dosya secilmedi.",
+    "Not yazin veya en az bir dosya secin.",
+    "Dosya boyutu 100 MB limitini asamaz.",
+    "Gecersiz islem.",
+  ].some((expected) => message.includes(expected));
 }

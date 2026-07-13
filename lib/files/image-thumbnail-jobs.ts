@@ -27,6 +27,7 @@ type ThumbnailProjectFile = Pick<
 >;
 
 let processorRunning = false;
+let recoveredInterruptedJobs = false;
 
 export async function queueProjectFileThumbnail(
   file: ThumbnailProjectFile,
@@ -110,6 +111,19 @@ async function processPendingImageThumbnails() {
   processorRunning = true;
 
   try {
+    if (!recoveredInterruptedJobs) {
+      await prisma.imageThumbnailJob.updateMany({
+        where: {
+          status: "PROCESSING",
+        },
+        data: {
+          status: "PENDING",
+          lastError: "Önceki işlem yarıda kaldı; otomatik olarak yeniden başlatıldı.",
+        },
+      });
+      recoveredInterruptedJobs = true;
+    }
+
     while (true) {
       const jobs = await prisma.imageThumbnailJob.findMany({
         where: {
@@ -262,6 +276,8 @@ async function processImageThumbnailJob(jobId: string) {
 function revalidateThumbnailPaths(projectId: string, dailyTaskId: string | null) {
   revalidatePath("/admin");
   revalidatePath("/admin/schedule");
+  revalidatePath("/admin/visits");
+  revalidatePath(`/admin/visits/${projectId}`);
   revalidatePath("/personnel");
   revalidatePath(`/admin/projects/${projectId}`);
 

@@ -25,6 +25,7 @@ type ProjectUploadContext = {
 };
 
 let processorRunning = false;
+let recoveredInterruptedJobs = false;
 
 export async function recordProjectUpload(
   upload: ProjectUploadResult,
@@ -102,6 +103,19 @@ async function processPendingHeicConversions() {
   processorRunning = true;
 
   try {
+    if (!recoveredInterruptedJobs) {
+      await prisma.heicConversionJob.updateMany({
+        where: {
+          status: "PROCESSING",
+        },
+        data: {
+          status: "PENDING",
+          lastError: "Önceki işlem yarıda kaldı; otomatik olarak yeniden başlatıldı.",
+        },
+      });
+      recoveredInterruptedJobs = true;
+    }
+
     while (true) {
       const jobs = await prisma.heicConversionJob.findMany({
         where: {

@@ -1,10 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Camera, ClipboardPenLine, MapPinCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import {
+  isCompressibleImage,
+  prepareFilesForUpload,
+} from "@/lib/client/image-compression";
+import {
+  enqueueVisitUpload,
+  listOfflineItems,
+  replaceOfflineItemFiles,
+  syncOfflineItems,
+} from "@/lib/offline/queue";
 
 type VisitInteractionPanelProps = {
   initialVisitId?: string | null;
@@ -25,8 +35,44 @@ export function VisitInteractionPanel({
   const [isPending, setIsPending] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [pendingUploads, setPendingUploads] = useState(0);
+  const [uploadMessage, setUploadMessage] = useState("");
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [visitConfirmation, setVisitConfirmation] = useState<"idle" | "confirm">("idle");
   const router = useRouter();
+
+  useEffect(() => {
+    void syncVisitUploads();
+
+    async function syncVisitUploads() {
+      const before = await listOfflineItems(["VISIT_UPLOAD"]);
+      setPendingUploads(before.length);
+
+      if (before.length === 0) {
+        return;
+      }
+
+      const result = await syncOfflineItems({
+        kinds: ["VISIT_UPLOAD"],
+        onProgress: ({ current, progress, total }) => {
+          setUploadMessage(`${current}/${total} ziyaret kaydı yükleniyor...`);
+          setUploadProgress(progress);
+        },
+      });
+
+      setPendingUploads(result.remaining);
+      setUploadProgress(null);
+      setUploadMessage(
+        result.remaining > 0
+          ? result.error || `${result.remaining} ziyaret kaydı tekrar denenecek.`
+          : "",
+      );
+
+      if (result.synced > 0) {
+        router.refresh();
+      }
+    }
+  }, [router]);
 
   async function submit(formData: FormData, successMessage: string, withLocation = false) {
     setIsPending(true);
@@ -64,6 +110,108 @@ export function VisitInteractionPanel({
       setError(
         submitError instanceof Error ? submitError.message : "Islem kaydedilemedi.",
       );
+    } finally {
+      setIsPending(false);
+    }
+  }
+
+  async function submitFiles(form: HTMLFormElement) {
+    setIsPending(true);
+    setMessage("");
+    setError("");
+    setUploadProgress(2);
+
+    const formData = new FormData(form);
+    const note = String(formData.get("note") ?? "").trim();
+    const files = formData
+      .getAll("files")
+      .filter((value): value is File => value instanceof File && value.size > 0);
+
+    if (files.length === 0) {
+      setError("Yüklenecek dosya seçilmedi.");
+      setUploadProgress(null);
+      setIsPending(false);
+      return;
+    }
+
+    let queuedItem;
+    try {
+      queuedItem = await enqueueVisitUpload({
+        projectId,
+        projectVisitId: activeVisitId || undefined,
+        note: note || undefined,
+        files,
+      });
+      form.reset();
+      setPendingUploads((current) => current + 1);
+    } catch {
+      setError(
+        "Dosyalar cihazdaki güvenli kuyruğa alınamadı. Depolama alanını kontrol edip tekrar deneyin.",
+      );
+      setUploadProgress(null);
+      setIsPending(false);
+      return;
+    }
+
+    try {
+      const hasCompressibleImage = files.some(isCompressibleImage);
+      const hasVideo = files.some((file) =>
+        file.type.toLowerCase().startsWith("video/"),
+      );
+
+      setUploadMessage(
+        hasCompressibleImage
+          ? "Fotoğraflar yükleme için hazırlanıyor..."
+          : hasVideo
+            ? "Video cihazda saklandı, yükleme uzun sürebilir..."
+            : "Dosyalar güvenli kuyrukta, yükleme başlıyor...",
+      );
+      setUploadProgress(6);
+
+      const preparedFiles = await prepareFilesForUpload(files);
+      await replaceOfflineItemFiles(queuedItem.id, preparedFiles);
+
+      if (!navigator.onLine) {
+        setUploadMessage("İnternet yok. Dosyalar cihazda saklandı ve bağlantıda yüklenecek.");
+        setUploadProgress(null);
+        return;
+      }
+
+      const result = await syncOfflineItems({
+        kinds: ["VISIT_UPLOAD"],
+        onProgress: ({ current, progress, total }) => {
+          setUploadMessage(`${current}/${total} ziyaret kaydı yükleniyor...`);
+          setUploadProgress(progress);
+        },
+      });
+      const remainingItems = await listOfflineItems(["VISIT_UPLOAD"]);
+      const isStillQueued = remainingItems.some((item) => item.id === queuedItem.id);
+
+      setPendingUploads(remainingItems.length);
+
+      if (result.failedIds.includes(queuedItem.id)) {
+        setError(result.error || "Dosyalar kaydedilemedi.");
+        setUploadMessage("");
+        setUploadProgress(null);
+        return;
+      }
+
+      if (isStillQueued) {
+        setUploadMessage(
+          result.error || "Bağlantı kesildi. Dosyalar cihazda saklandı ve tekrar denenecek.",
+        );
+        setUploadProgress(null);
+        return;
+      }
+
+      setUploadProgress(100);
+      setUploadMessage("Dosyalar yüklendi; önizleme işlemleri arka planda sürüyor.");
+      setMessage("Dosya eklendi.");
+      router.refresh();
+      window.setTimeout(() => {
+        setUploadMessage("");
+        setUploadProgress(null);
+      }, 3500);
     } finally {
       setIsPending(false);
     }
@@ -151,10 +299,7 @@ export function VisitInteractionPanel({
             className="flex flex-col gap-3 rounded-md border border-navy/10 bg-primary/5 p-3"
             onSubmit={(event) => {
               event.preventDefault();
-              const formData = new FormData(event.currentTarget);
-              formData.set("operation", "file");
-              submit(formData, "Dosya eklendi.");
-              event.currentTarget.reset();
+              void submitFiles(event.currentTarget);
             }}
           >
             <label className="flex items-center gap-2 text-sm font-medium text-navy" htmlFor="files">
@@ -185,6 +330,32 @@ export function VisitInteractionPanel({
           <p className="rounded-md border border-primary/15 bg-primary/5 px-3 py-2 text-xs text-muted-foreground">
             Yeni not ve dosyalar aktif ziyaret kaydina baglanir.
           </p>
+        ) : null}
+        {uploadMessage || pendingUploads > 0 ? (
+          <div
+            aria-valuemax={uploadProgress !== null ? 100 : undefined}
+            aria-valuemin={uploadProgress !== null ? 0 : undefined}
+            aria-valuenow={uploadProgress ?? undefined}
+            className="relative overflow-hidden rounded-md border border-primary/20 bg-white px-3 py-2 text-sm text-muted-foreground"
+            role={uploadProgress !== null ? "progressbar" : "status"}
+          >
+            {uploadProgress !== null ? (
+              <div
+                className="absolute inset-y-0 left-0 overflow-hidden bg-primary/10 transition-[width] duration-300 ease-out"
+                style={{ width: `${uploadProgress}%` }}
+              >
+                <div className="h-full w-full animate-pulse bg-gradient-to-r from-primary/5 via-primary/25 to-primary/10" />
+              </div>
+            ) : null}
+            <div className="relative flex items-center justify-between gap-3">
+              <span>
+                {uploadMessage || `${pendingUploads} ziyaret yüklemesi bağlantı bekliyor.`}
+              </span>
+              {uploadProgress !== null ? (
+                <span className="shrink-0 tabular-nums">%{uploadProgress}</span>
+              ) : null}
+            </div>
+          </div>
         ) : null}
         {message ? (
           <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">

@@ -75,7 +75,7 @@ export function QuickProjectNote({
             <span className="flex items-center gap-2"><Camera className="h-4 w-4" /> Fotograf / dosya</span>
             <input
               accept="image/*,.pdf"
-              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm file:mr-3 file:rounded-md file:border-0 file:bg-primary/10 file:px-3 file:py-2 file:text-primary"
+              className="w-full cursor-pointer rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm file:mr-3 file:cursor-pointer file:rounded-md file:border file:border-primary/35 file:bg-primary/10 file:px-3 file:py-2 file:font-semibold file:text-primary file:shadow-sm file:transition hover:file:border-primary/60 hover:file:bg-primary/15"
               multiple
               name="files"
               type="file"

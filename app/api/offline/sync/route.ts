@@ -105,11 +105,23 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Islem kaydedilemedi.";
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Islem kaydedilemedi." },
-      { status: 400 },
+      { error: message },
+      { status: isPersonnelRequestError(message) ? 400 : 500 },
     );
   }
+}
+
+function isPersonnelRequestError(message: string) {
+  return [
+    " is required",
+    "Gecersiz offline kayit tipi.",
+    "Gorev bulunamadi",
+    "Önce aktif sahadaki görevi kapatmalısın.",
+    "Bugün yaptıklarının notunu yaz!",
+    "Dosya boyutu 100 MB limitini asamaz.",
+  ].some((expected) => message.includes(expected));
 }
 
 async function syncArriveSite(
