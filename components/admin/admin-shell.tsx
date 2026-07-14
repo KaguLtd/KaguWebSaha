@@ -52,7 +52,7 @@ const navItems = [
 ];
 
 const observerNavItems = navItems.filter((item) =>
-  ["/admin/projects", "/admin/schedule", "/admin/visits"].includes(
+  ["/admin", "/admin/projects", "/admin/schedule", "/admin/visits"].includes(
     item.href,
   ),
 );

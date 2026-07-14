@@ -8,6 +8,7 @@ export type OfflineQueueKind = "PERSONNEL" | "VISIT_UPLOAD";
 type QueueItemBase = {
   id: string;
   files?: File[];
+  expectedFileCount?: number;
   createdAt: string;
 };
 
@@ -124,6 +125,7 @@ async function addQueueItem(
     ...item,
     id: createClientId(),
     createdAt: new Date().toISOString(),
+    expectedFileCount: item.files?.filter((file) => file.size > 0).length ?? 0,
   } as OfflineQueueItem;
 
   await withStore("readwrite", (store) => store.add(queuedItem));
@@ -140,7 +142,9 @@ export async function replaceOfflineItemFiles(id: string, files: File[]) {
     return;
   }
 
-  await withStore("readwrite", (store) => store.put({ ...item, files }));
+  await withStore("readwrite", (store) =>
+    store.put({ ...item, expectedFileCount: files.length, files }),
+  );
 }
 
 export async function listOfflineItems(kinds?: OfflineQueueKind[]) {
@@ -240,11 +244,11 @@ async function runSync(
         if (!response.ok) {
           const responseError = response.error || "Kayıt gönderilemedi.";
 
-          if (response.status >= 400 && response.status < 500) {
+          if ([400, 404, 413, 422].includes(response.status)) {
             await deleteOfflineItem(item.id);
             failedIds.push(item.id);
             error = responseError;
-            continue;
+            break;
           }
 
           error = responseError;
@@ -277,6 +281,19 @@ function postQueueItem(
   item: OfflineQueueItem,
   onProgress: (progress: number) => void,
 ) {
+  const files = (item.files ?? []).filter(
+    (file) => file instanceof Blob && file.size > 0,
+  );
+
+  if ((item.expectedFileCount ?? 0) > files.length) {
+    return Promise.resolve({
+      error:
+        "Önceki dosyalarınız yüklenemedi! Dosyalar cihaz depolamasında bulunamadı; lütfen yeniden seçip yükleyin.",
+      ok: false,
+      status: 422,
+    });
+  }
+
   const formData = new FormData();
   let endpoint: string;
 
@@ -304,8 +321,11 @@ function postQueueItem(
     formData.set("note", item.note);
   }
 
-  for (const file of item.files ?? []) {
-    formData.append("files", file);
+  for (const [index, file] of files.entries()) {
+    const fileName = file instanceof File && file.name
+      ? file.name
+      : `bekleyen-dosya-${index + 1}`;
+    formData.append("files", file, fileName);
   }
 
   return new Promise<{ error?: string; ok: boolean; status: number }>(
@@ -321,16 +341,39 @@ function postQueueItem(
       request.onerror = () => reject(new Error("Upload failed"));
       request.ontimeout = () => reject(new Error("Upload timed out"));
       request.onload = () => {
-        let payload: { error?: string } = {};
+        let payload: { error?: string; ok?: boolean } = {};
+        const contentType = request.getResponseHeader("content-type") ?? "";
         try {
           payload = JSON.parse(request.responseText || "{}");
         } catch {
-          // An empty response can still be a successful request.
+          // API başarıları her zaman JSON olarak ve ok: true ile dönmelidir.
+        }
+
+        const responsePath = request.responseURL
+          ? new URL(request.responseURL, window.location.href).pathname
+          : "";
+        const receivedApiSuccess =
+          request.status >= 200 &&
+          request.status < 300 &&
+          contentType.includes("application/json") &&
+          payload.ok === true;
+
+        if (
+          responsePath === "/login" ||
+          (request.status >= 200 && request.status < 300 && !receivedApiSuccess)
+        ) {
+          resolve({
+            error:
+              "Oturum süresi doldu. Bekleyen dosyalar cihazda korundu; giriş yaptıktan sonra tekrar yüklenecek.",
+            ok: false,
+            status: 401,
+          });
+          return;
         }
 
         resolve({
           error: payload.error,
-          ok: request.status >= 200 && request.status < 300,
+          ok: receivedApiSuccess,
           status: request.status,
         });
       };

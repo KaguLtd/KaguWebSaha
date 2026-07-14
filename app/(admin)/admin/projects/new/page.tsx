@@ -9,6 +9,11 @@ export default async function NewProjectPage() {
 
   const [customers, projects] = await Promise.all([
     prisma.customer.findMany({
+      include: {
+        _count: {
+          select: { projects: true },
+        },
+      },
       orderBy: {
         name: "asc",
       },
@@ -36,7 +41,9 @@ export default async function NewProjectPage() {
         <ProjectDrawers
           customers={customers.map((customer) => ({
             id: customer.id,
+            info: customer.info ?? "",
             name: customer.name,
+            projectCount: customer._count.projects,
           }))}
           projects={projects.map((project) => ({
             city: project.city ?? "",

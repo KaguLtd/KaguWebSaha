@@ -3,6 +3,7 @@ import { PendingHeicRefresh } from "@/components/files/pending-heic-refresh";
 import { Button } from "@/components/ui/button";
 import { OfflineSyncBoot } from "@/components/personnel/offline-sync-boot";
 import { requireRole } from "@/lib/auth/session";
+import { completeStaleOnSiteTasks } from "@/lib/tasks/rollover";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +14,7 @@ export default async function PersonnelLayout({
   children: React.ReactNode;
 }>) {
   const user = await requireRole("PERSONNEL");
+  await completeStaleOnSiteTasks();
 
   return (
     <div className="min-h-screen bg-background">

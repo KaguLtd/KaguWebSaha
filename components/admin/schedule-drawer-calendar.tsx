@@ -55,6 +55,7 @@ type ScheduleDrawerCalendarProps = {
   currentUserId: string;
   currentUserRole: "ADMIN" | "OBSERVER" | "PERSONNEL";
   days: ScheduleDay[];
+  initialSelectedDate: string;
   personnel: SchedulePerson[];
   projects: ScheduleProject[];
   tasks: ScheduleTask[];
@@ -66,6 +67,7 @@ export function ScheduleDrawerCalendar({
   currentUserId,
   currentUserRole,
   days,
+  initialSelectedDate,
   personnel,
   projects,
   tasks,
@@ -136,6 +138,7 @@ export function ScheduleDrawerCalendar({
       <MobileScheduleList
         days={days}
         hideAssignees={currentUserRole === "OBSERVER"}
+        initialSelectedDate={initialSelectedDate}
         onCreate={(date) => setDrawer({ date, mode: "create" })}
         onEdit={(taskId) => setDrawer({ mode: "edit", taskId })}
         tasksByDate={tasksByDate}
@@ -615,27 +618,29 @@ function formatDateOnly(value: string) {
 function MobileScheduleList({
   days,
   hideAssignees,
+  initialSelectedDate,
   onCreate,
   onEdit,
   tasksByDate,
 }: {
   days: ScheduleDay[];
   hideAssignees: boolean;
+  initialSelectedDate: string;
   onCreate: (date: string) => void;
   onEdit: (taskId: string) => void;
   tasksByDate: Map<string, ScheduleTask[]>;
 }) {
   const [weekIndex, setWeekIndex] = useState(() => {
-    const today = new Date();
-    const localDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-    const todayIndex = days.findIndex((day) => day.date === localDate);
+    const todayIndex = days.findIndex((day) => day.date === initialSelectedDate);
     const firstMonthIndex = days.findIndex((day) => day.isCurrentMonth);
     return Math.floor((todayIndex >= 0 ? todayIndex : Math.max(firstMonthIndex, 0)) / 7);
   });
   const week = days.slice(weekIndex * 7, weekIndex * 7 + 7);
   const [selectedDate, setSelectedDate] = useState(() => {
     const currentWeek = days.slice(weekIndex * 7, weekIndex * 7 + 7);
-    return currentWeek.find((day) => day.isCurrentMonth)?.date ?? currentWeek[0]?.date ?? "";
+    return currentWeek.some((day) => day.date === initialSelectedDate)
+      ? initialSelectedDate
+      : currentWeek.find((day) => day.isCurrentMonth)?.date ?? currentWeek[0]?.date ?? "";
   });
   const selectedDay = days.find((day) => day.date === selectedDate) ?? week[0];
   const selectedTasks = selectedDay ? tasksByDate.get(selectedDay.date) ?? [] : [];

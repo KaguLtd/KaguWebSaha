@@ -1,6 +1,5 @@
 import type { Prisma } from "@prisma/client";
 import Link from "next/link";
-import { redirect } from "next/navigation";
 
 import { StatusBadge } from "@/components/admin/status-badge";
 import { CompactFilePreview } from "@/components/files/compact-file-preview";
@@ -12,6 +11,7 @@ import {
 } from "@/lib/dates/today";
 import { prisma } from "@/lib/db/prisma";
 import { requireAnyRole } from "@/lib/auth/session";
+import { completeStaleOnSiteTasks } from "@/lib/tasks/rollover";
 
 type DashboardTask = Prisma.DailyTaskGetPayload<{
   include: {
@@ -35,10 +35,8 @@ type DashboardTask = Prisma.DailyTaskGetPayload<{
 }>;
 
 export default async function AdminPage() {
-  const user = await requireAnyRole(["ADMIN", "OBSERVER"]);
-  if (user.role === "OBSERVER") {
-    redirect("/admin/visits");
-  }
+  await requireAnyRole(["ADMIN", "OBSERVER"]);
+  await completeStaleOnSiteTasks();
   const today = getTodayDateOnly();
   const yesterday = addDateOnlyDays(today, -1);
   const tasksPromise = prisma.dailyTask.findMany({
@@ -245,16 +243,6 @@ async function YesterdaySection({
 }) {
   const tasks = await tasksPromise;
   const { end, start } = getDateOnlyRangeInAppTimeZone(yesterday);
-  const events = tasks.flatMap((task) =>
-    task.timelineEvents.filter(
-      (event) => event.createdAt >= start && event.createdAt < end,
-    ),
-  );
-  const notes = events.filter(
-    (event) => event.eventType === "NOTE_ADDED" && event.description,
-  );
-  const files = events.filter((event) => event.eventType === "FILE_ADDED" && event.file);
-  const completedCount = tasks.filter((task) => task.status === "COMPLETED").length;
   const unfinishedCount = tasks.filter((task) => task.status !== "COMPLETED").length;
   const tasksWithoutNotes = tasks.filter((task) => {
     const taskNotes = task.timelineEvents.filter(
@@ -277,9 +265,6 @@ async function YesterdaySection({
             {formatDisplayDateOnly(yesterday)} operasyon ozeti
           </p>
         </div>
-        <p className="text-xs font-medium text-muted-foreground">
-          {tasks.length} gorev, {completedCount} tamamlandi
-        </p>
       </div>
 
       {tasks.length === 0 ? (
@@ -287,13 +272,7 @@ async function YesterdaySection({
           Dun icin kayitli saha gorevi yok.
         </p>
       ) : (
-        <div className="grid gap-4 p-4 lg:grid-cols-[280px_1fr]">
-          <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4 lg:grid-cols-2">
-            <SummaryMetric label="Gorev" value={tasks.length} />
-            <SummaryMetric label="Tamamlanan" value={completedCount} />
-            <SummaryMetric label="Not" value={notes.length} />
-            <SummaryMetric label="Dosya" value={files.length} />
-          </div>
+        <div className="p-4">
           <div className="grid gap-3 md:grid-cols-2">
             {tasks.map((task) => (
               <article
@@ -323,7 +302,7 @@ async function YesterdaySection({
             ))}
           </div>
           {unfinishedCount > 0 || tasksWithoutNotes.length > 0 ? (
-            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 lg:col-span-2">
+            <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
               {unfinishedCount > 0 ? `${unfinishedCount} gorev tamamlanmamis. ` : ""}
               {tasksWithoutNotes.length > 0
                 ? `${tasksWithoutNotes.length} gorevde dun tarihli not bulunmuyor.`
@@ -333,15 +312,6 @@ async function YesterdaySection({
         </div>
       )}
     </section>
-  );
-}
-
-function SummaryMetric({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-md border border-navy/10 bg-primary/5 p-3">
-      <p className="text-xs font-medium text-muted-foreground">{label}</p>
-      <p className="mt-1 text-xl font-semibold text-navy">{value}</p>
-    </div>
   );
 }
 

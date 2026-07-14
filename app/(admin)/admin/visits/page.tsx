@@ -1,4 +1,6 @@
 import Link from "next/link";
+import type { Prisma } from "@prisma/client";
+import { Search } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { requireAnyRole } from "@/lib/auth/session";
@@ -9,15 +11,28 @@ export const dynamic = "force-dynamic";
 export default async function VisitsPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ customerId?: string }>;
+  searchParams?: Promise<{ customerId?: string; q?: string }>;
 }) {
   await requireAnyRole(["ADMIN", "OBSERVER"]);
   const params = await searchParams;
   const customerId = String(params?.customerId ?? "").trim();
+  const query = String(params?.q ?? "").trim();
+  const where: Prisma.ProjectWhereInput = {
+    isActive: true,
+    ...(customerId ? { customerId } : {}),
+    ...(query
+      ? {
+          OR: [
+            { name: { contains: query, mode: "insensitive" } },
+            { customer: { name: { contains: query, mode: "insensitive" } } },
+          ],
+        }
+      : {}),
+  };
   const [customers, projects] = await Promise.all([
     prisma.customer.findMany({ orderBy: { name: "asc" } }),
     prisma.project.findMany({
-      where: { isActive: true, ...(customerId ? { customerId } : {}) },
+      where,
       include: { customer: true },
       orderBy: [{ customer: { name: "asc" } }, { name: "asc" }],
     }),
@@ -33,7 +48,20 @@ export default async function VisitsPage({
           </p>
         </div>
 
-        <form className="mt-6 flex flex-col gap-3 rounded-lg border border-navy/10 bg-white p-4 shadow-card sm:flex-row">
+        <form className="mt-6 grid gap-3 rounded-lg border border-navy/10 bg-white p-4 shadow-card md:grid-cols-[1.5fr_1fr_auto]">
+          <div className="relative">
+            <Search
+              aria-hidden="true"
+              className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground"
+            />
+            <input
+              className="w-full rounded-md border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm text-navy shadow-sm outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary"
+              defaultValue={query}
+              name="q"
+              placeholder="Proje veya cari ara"
+              type="search"
+            />
+          </div>
           <select
             className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-navy shadow-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary"
             defaultValue={customerId}
@@ -50,7 +78,7 @@ export default async function VisitsPage({
         {projects.length === 0 ? (
           <section className="mt-8 rounded-lg border border-primary/15 bg-white p-8 text-center shadow-card">
             <h2 className="text-lg font-semibold">Proje bulunamadi</h2>
-            <p className="mt-2 text-sm text-muted-foreground">Cari filtresini degistirin.</p>
+            <p className="mt-2 text-sm text-muted-foreground">Arama veya cari filtresini degistirin.</p>
           </section>
         ) : (
           <section className="mt-6 overflow-hidden rounded-lg border border-navy/10 bg-white shadow-card">

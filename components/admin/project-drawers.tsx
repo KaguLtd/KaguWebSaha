@@ -8,8 +8,10 @@ import {
   archiveProjectAction,
   createCustomerAction,
   createProjectAction,
+  deleteCustomerAction,
   deleteProjectAction,
   restoreProjectAction,
+  updateCustomerAction,
   updateProjectAction,
 } from "@/app/(admin)/admin/projects/new/actions";
 import { Button } from "@/components/ui/button";
@@ -17,7 +19,9 @@ import { Drawer } from "@/components/ui/drawer";
 
 export type ProjectDrawerCustomer = {
   id: string;
+  info: string;
   name: string;
+  projectCount: number;
 };
 
 export type ProjectDrawerProject = {
@@ -33,7 +37,7 @@ export type ProjectDrawerProject = {
   name: string;
 };
 
-type DrawerMode = "customer" | "project" | "edit" | null;
+type DrawerMode = "customer" | "customerEdit" | "project" | "edit" | null;
 
 type ProjectDrawersProps = {
   customers: ProjectDrawerCustomer[];
@@ -44,10 +48,29 @@ export function ProjectDrawers({ customers, projects }: ProjectDrawersProps) {
   const [mode, setMode] = useState<DrawerMode>(null);
   const [projectFilter, setProjectFilter] = useState<"active" | "archived">("active");
   const [projectSearch, setProjectSearch] = useState("");
+  const [customerSearch, setCustomerSearch] = useState("");
   const [isPending, setIsPending] = useState(false);
   const [message, setMessage] = useState("");
+  const [messageIsError, setMessageIsError] = useState(false);
+  const [selectedCustomerId, setSelectedCustomerId] = useState(customers[0]?.id ?? "");
   const [selectedProjectId, setSelectedProjectId] = useState(projects[0]?.id ?? "");
   const router = useRouter();
+  const selectedCustomer = useMemo(
+    () => customers.find((customer) => customer.id === selectedCustomerId),
+    [customers, selectedCustomerId],
+  );
+  const customerOptions = useMemo(() => {
+    const normalizedQuery = customerSearch.trim().toLowerCase();
+    const filtered = customers.filter((customer) =>
+      customer.name.toLowerCase().includes(normalizedQuery),
+    );
+
+    if (selectedCustomer && !filtered.some((customer) => customer.id === selectedCustomer.id)) {
+      return [selectedCustomer, ...filtered];
+    }
+
+    return filtered;
+  }, [customerSearch, customers, selectedCustomer]);
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedProjectId),
     [projects, selectedProjectId],
@@ -74,6 +97,7 @@ export function ProjectDrawers({ customers, projects }: ProjectDrawersProps) {
   ) {
     setIsPending(true);
     setMessage("");
+    setMessageIsError(false);
 
     try {
       if (action === createProjectAction || action === updateProjectAction) {
@@ -96,8 +120,16 @@ export function ProjectDrawers({ customers, projects }: ProjectDrawersProps) {
       if (action === deleteProjectAction) {
         setSelectedProjectId(projects.find((project) => project.id !== selectedProjectId)?.id ?? "");
       }
+      if (action === deleteCustomerAction) {
+        setSelectedCustomerId(
+          customers.find((customer) => customer.id !== selectedCustomerId)?.id ?? "",
+        );
+      }
       setMessage(successMessage);
       router.refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Islem tamamlanamadi.");
+      setMessageIsError(true);
     } finally {
       setIsPending(false);
     }
@@ -106,10 +138,19 @@ export function ProjectDrawers({ customers, projects }: ProjectDrawersProps) {
   return (
     <>
       <section className="rounded-lg border border-primary/15 bg-white p-5 text-navy shadow-card">
-        <div className="mx-auto grid max-w-2xl gap-3 sm:grid-cols-2">
+        <div className="mx-auto grid max-w-3xl gap-3 sm:grid-cols-3">
           <Button className="h-16 justify-start px-5 text-base" onClick={() => setMode("customer")}>
             <Building2 className="h-5 w-5" aria-hidden="true" />
             Cari Ac
+          </Button>
+          <Button
+            className="h-16 justify-start px-5 text-base"
+            disabled={customers.length === 0}
+            onClick={() => setMode("customerEdit")}
+            variant="outline"
+          >
+            <Building2 className="h-5 w-5" aria-hidden="true" />
+            Cari Duzenle
           </Button>
           <Button
             className="h-16 justify-start px-5 text-base"
@@ -121,7 +162,11 @@ export function ProjectDrawers({ customers, projects }: ProjectDrawersProps) {
           </Button>
         </div>
         {message ? (
-          <p className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+          <p className={`mt-4 rounded-md border px-3 py-2 text-sm ${
+            messageIsError
+              ? "border-red-200 bg-red-50 text-red-700"
+              : "border-emerald-200 bg-emerald-50 text-emerald-700"
+          }`}>
             {message}
           </p>
         ) : null}
@@ -230,6 +275,106 @@ export function ProjectDrawers({ customers, projects }: ProjectDrawersProps) {
             {isPending ? "Kaydediliyor..." : "Kaydet"}
           </Button>
         </form>
+      </Drawer>
+
+      <Drawer
+        description="Mevcut cariyi secerek firma bilgilerini guncelle veya kullanilmayan cariyi sil."
+        isOpen={mode === "customerEdit"}
+        onClose={() => setMode(null)}
+        title="Cari Duzenle"
+      >
+        <div className="mb-4 flex flex-col gap-3 rounded-md border border-navy/10 bg-primary/5 p-3">
+          <div className="relative">
+            <Search
+              aria-hidden="true"
+              className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground"
+            />
+            <input
+              className="w-full rounded-md border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm text-navy shadow-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary"
+              onChange={(event) => setCustomerSearch(event.target.value)}
+              placeholder="Cari ara"
+              type="search"
+              value={customerSearch}
+            />
+          </div>
+          <select
+            className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-navy shadow-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary"
+            onChange={(event) => setSelectedCustomerId(event.target.value)}
+            value={selectedCustomerId}
+          >
+            {customerOptions.map((customer) => (
+              <option key={customer.id} value={customer.id}>
+                {customer.name} ({customer.projectCount} proje)
+              </option>
+            ))}
+          </select>
+          {customerOptions.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Aramayla eslesen cari bulunamadi.</p>
+          ) : null}
+        </div>
+
+        {selectedCustomer ? (
+          <>
+            <form
+              className="flex flex-col gap-4"
+              key={selectedCustomer.id}
+              onSubmit={(event) => {
+                event.preventDefault();
+                submit(
+                  new FormData(event.currentTarget),
+                  updateCustomerAction,
+                  "Cari bilgileri guncellendi.",
+                );
+              }}
+            >
+              <input name="customerId" type="hidden" value={selectedCustomer.id} />
+              <Field
+                defaultValue={selectedCustomer.name}
+                label="Firma / Sahis Ismi"
+                name="name"
+                required
+              />
+              <TextArea
+                defaultValue={selectedCustomer.info}
+                label="Firma / Sahis Bilgileri"
+                name="info"
+                rows={5}
+              />
+              <Button disabled={isPending} type="submit">
+                {isPending ? "Kaydediliyor..." : "Degisiklikleri Kaydet"}
+              </Button>
+            </form>
+
+            <form
+              className="mt-6 rounded-md border border-red-200 bg-red-50 p-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!window.confirm("Bu cari tamamen silinecek. Devam edilsin mi?")) {
+                  return;
+                }
+                submit(
+                  new FormData(event.currentTarget),
+                  deleteCustomerAction,
+                  "Cari tamamen silindi.",
+                );
+              }}
+            >
+              <input name="customerId" type="hidden" value={selectedCustomer.id} />
+              {selectedCustomer.projectCount > 0 ? (
+                <p className="mb-3 text-sm text-red-700">
+                  Bu cariye bagli {selectedCustomer.projectCount} proje oldugu icin once projeler silinmelidir.
+                </p>
+              ) : null}
+              <Button
+                disabled={isPending || selectedCustomer.projectCount > 0}
+                type="submit"
+                variant="destructive"
+              >
+                Cariyi sil
+              </Button>
+            </form>
+          </>
+        ) : null}
       </Drawer>
 
       <Drawer

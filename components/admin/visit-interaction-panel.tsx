@@ -63,7 +63,9 @@ export function VisitInteractionPanel({
       setPendingUploads(result.remaining);
       setUploadProgress(null);
       setUploadMessage(
-        result.remaining > 0
+        result.failedIds.length > 0
+          ? result.error || "Önceki dosyalarınız yüklenemedi!"
+          : result.remaining > 0
           ? result.error || `${result.remaining} ziyaret kaydı tekrar denenecek.`
           : "",
       );

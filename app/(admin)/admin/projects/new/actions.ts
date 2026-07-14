@@ -81,6 +81,49 @@ export async function createCustomerAction(formData: FormData) {
   revalidatePath("/admin/projects/new");
 }
 
+export async function updateCustomerAction(formData: FormData) {
+  await requireRole("ADMIN");
+
+  const customerId = readRequiredText(formData, "customerId");
+  const name = readRequiredText(formData, "name");
+  const info = readText(formData, "info");
+
+  await prisma.customer.update({
+    where: { id: customerId },
+    data: {
+      name,
+      info: info || null,
+    },
+  });
+
+  revalidateCustomerPaths();
+}
+
+export async function deleteCustomerAction(formData: FormData) {
+  await requireRole("ADMIN");
+
+  const customerId = readRequiredText(formData, "customerId");
+  const projectCount = await prisma.project.count({ where: { customerId } });
+
+  if (projectCount > 0) {
+    throw new Error(
+      `Bu cariye bagli ${projectCount} proje var. Once bu projeleri silmeden cari silinemez.`,
+    );
+  }
+
+  await prisma.customer.delete({ where: { id: customerId } });
+  revalidateCustomerPaths();
+}
+
+function revalidateCustomerPaths() {
+  revalidatePath("/admin");
+  revalidatePath("/admin/projects");
+  revalidatePath("/admin/projects/new");
+  revalidatePath("/admin/schedule");
+  revalidatePath("/admin/visits");
+  revalidatePath("/admin/reports");
+}
+
 export async function createProjectAction(formData: FormData) {
   const user = await requireRole("ADMIN");
 

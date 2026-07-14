@@ -52,7 +52,9 @@ function useOfflineSync() {
       pending: result.remaining,
       progress: null,
       message:
-        result.error && result.remaining > 0
+        result.failedIds.length > 0
+          ? result.error || "Önceki kayıtlarınız yüklenemedi!"
+          : result.error && result.remaining > 0
           ? result.error
           : result.synced > 0
           ? `${result.synced} bekleyen kayit gonderildi.`

@@ -123,6 +123,7 @@ export default async function SchedulePage({
             dayNumber: date.getUTCDate(),
             isCurrentMonth: date.getUTCMonth() === monthDate.getUTCMonth(),
           }))}
+          initialSelectedDate={toDateInputValue(selectedDate)}
           personnel={personnel.map((person) => ({
             fullName: person.fullName,
             id: person.id,

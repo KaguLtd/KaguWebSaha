@@ -49,6 +49,15 @@ export function OfflineSyncBoot({
         },
       });
 
+      if (result.failedIds.length > 0) {
+        setProgress(null);
+        setMessage(result.error || "Önceki kayıtlarınız yüklenemedi!");
+        if (result.synced > 0) {
+          router.refresh();
+        }
+        return;
+      }
+
       if (result.synced > 0) {
         setMessage(
           result.remaining > 0

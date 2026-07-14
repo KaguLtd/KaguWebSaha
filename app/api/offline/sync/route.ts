@@ -67,6 +67,31 @@ async function requireAssignedTodayTask(taskId: string, userId: string) {
   return task;
 }
 
+async function requireAssignedPastOrTodayTask(taskId: string, userId: string) {
+  const task = await prisma.dailyTask.findFirst({
+    where: {
+      id: taskId,
+      taskDate: {
+        lte: getTodayDateOnly(),
+      },
+      assignees: {
+        some: {
+          userId,
+        },
+      },
+    },
+    include: {
+      project: true,
+    },
+  });
+
+  if (!task) {
+    throw new Error("Gorev bulunamadi veya bu personele atanmamis.");
+  }
+
+  return task;
+}
+
 export async function POST(request: Request) {
   const user = await requireRole("PERSONNEL");
   try {
@@ -357,7 +382,7 @@ async function syncNote(
   formData: FormData,
 ) {
   const note = readRequiredText(formData, "note");
-  const task = await requireAssignedTodayTask(taskId, userId);
+  const task = await requireAssignedPastOrTodayTask(taskId, userId);
   const files = formData
     .getAll("files")
     .filter((value): value is File => value instanceof File && value.size > 0);
