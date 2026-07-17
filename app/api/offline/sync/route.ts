@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
+import { File as NodeFile } from "node:buffer";
 
 import { requireRole } from "@/lib/auth/session";
 import { getDateOnlyRangeInAppTimeZone, getTodayDateOnly } from "@/lib/dates/today";
@@ -11,6 +12,7 @@ import { prisma } from "@/lib/db/prisma";
 
 type ProjectUpload = NonNullable<Awaited<ReturnType<typeof saveProjectUpload>>>;
 type PersonnelSyncType = "ARRIVED_SITE" | "LEFT_SITE" | "NOTE";
+type OfflineClaimType = PersonnelSyncType | "FILE";
 type SyncPayload = FormData | Record<string, unknown>;
 
 function readPayloadValue(payload: SyncPayload, name: string) {
@@ -83,6 +85,26 @@ function parseSyncType(value: string): PersonnelSyncType | null {
     : null;
 }
 
+function readRequiredHeader(request: Request, name: string) {
+  const value = request.headers.get(name)?.trim() ?? "";
+
+  if (!value) {
+    throw new Error(`${name} is required`);
+  }
+
+  return value;
+}
+
+function decodeUploadHeader(request: Request, name: string) {
+  const value = readRequiredHeader(request, name);
+
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    throw new Error(`Gecersiz ${name} degeri.`);
+  }
+}
+
 async function requireAssignedTodayTask(taskId: string, userId: string) {
   const task = await prisma.dailyTask.findFirst({
     where: {
@@ -136,6 +158,41 @@ export async function POST(request: Request) {
   let claimedClientItemId: string | null = null;
 
   try {
+    if (request.headers.get("x-kagu-upload-kind") === "personnel-note-file") {
+      const clientItemId = readRequiredHeader(request, "x-kagu-client-item-id");
+      const taskId = readRequiredHeader(request, "x-kagu-task-id");
+      const fileName = decodeUploadHeader(request, "x-kagu-file-name");
+      const mimeType = decodeUploadHeader(request, "x-kagu-mime-type");
+      const claim = await claimOfflineItem(user.id, clientItemId, "FILE", taskId);
+
+      if (claim === "duplicate") {
+        return NextResponse.json({ ok: true, duplicate: true });
+      }
+
+      if (claim !== "claimed") {
+        return NextResponse.json(
+          {
+            error:
+              claim === "processing"
+                ? "Dosya baska bir ekranda gonderiliyor; cihazda korunup tekrar denenecek."
+                : "Bu kayit kimligi baska bir islemde kullanilmis.",
+          },
+          { status: 409 },
+        );
+      }
+
+      claimedClientItemId = clientItemId;
+      await syncPersonnelNoteFile(
+        request,
+        user.id,
+        clientItemId,
+        taskId,
+        fileName,
+        mimeType,
+      );
+      return NextResponse.json({ ok: true });
+    }
+
     const payload = await readSyncPayload(request);
     const clientItemId = readRequiredText(payload, "clientItemId");
     const requestedType = readRequiredText(payload, "type");
@@ -205,7 +262,7 @@ export async function POST(request: Request) {
 async function claimOfflineItem(
   userId: string,
   clientItemId: string,
-  type: PersonnelSyncType,
+  type: OfflineClaimType,
   taskId: string,
 ) {
   try {
@@ -239,6 +296,54 @@ async function claimOfflineItem(
 
     return existing.status === "SYNCED" ? ("duplicate" as const) : ("processing" as const);
   }
+}
+
+async function syncPersonnelNoteFile(
+  request: Request,
+  userId: string,
+  clientItemId: string,
+  taskId: string,
+  fileName: string,
+  mimeType: string,
+) {
+  const task = await requireAssignedPastOrTodayTask(taskId, userId);
+  const buffer = Buffer.from(await request.arrayBuffer());
+
+  if (buffer.byteLength === 0) {
+    throw new Error("Dosya bos olamaz.");
+  }
+
+  const file = new NodeFile([buffer], fileName, { type: mimeType });
+  const upload = await saveProjectUpload(file, task.projectId);
+
+  if (!upload) {
+    throw new Error("Dosya kaydedilemedi.");
+  }
+
+  const now = new Date();
+  await prisma.$transaction(async (tx) => {
+    await recordProjectUpload(
+      upload,
+      {
+        projectId: task.projectId,
+        dailyTaskId: task.id,
+        uploadedByUserId: userId,
+        timelineTitle: "Personel dosya ekledi",
+      },
+      tx,
+    );
+
+    await tx.offlinePendingItem.update({
+      where: { clientItemId },
+      data: {
+        status: "SYNCED",
+        syncedAt: now,
+        lastError: null,
+      },
+    });
+  });
+
+  scheduleHeicConversionProcessing();
 }
 
 function getPersonnelSyncError(error: unknown) {

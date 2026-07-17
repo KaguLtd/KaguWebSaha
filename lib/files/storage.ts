@@ -63,6 +63,7 @@ export type PendingHeicProjectUpload = {
 };
 
 export type ProjectUploadResult = ReadyProjectUpload | PendingHeicProjectUpload;
+type UploadFile = Pick<File, "arrayBuffer" | "name" | "size" | "type">;
 
 function getUploadRoot() {
   const uploadDir = process.env.UPLOAD_DIR || DEFAULT_UPLOAD_DIR;
@@ -78,7 +79,7 @@ function sanitizeFileName(fileName: string) {
     .slice(0, 120);
 }
 
-function isHeicUpload(file: File, originalName: string, buffer: Buffer) {
+function isHeicUpload(file: UploadFile, originalName: string, buffer: Buffer) {
   const mimeType = file.type.toLowerCase();
   const extension = path.extname(originalName).toLowerCase();
 
@@ -202,7 +203,7 @@ export async function removeStorageFile(storagePath: string) {
   }
 }
 
-export async function saveProjectUpload(file: File, projectId: string): Promise<ProjectUploadResult | null> {
+export async function saveProjectUpload(file: UploadFile, projectId: string): Promise<ProjectUploadResult | null> {
   if (file.size <= 0) {
     return null;
   }

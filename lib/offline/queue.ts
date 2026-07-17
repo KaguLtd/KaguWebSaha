@@ -277,6 +277,12 @@ function getQueueItemKind(item: OfflineQueueItem): OfflineQueueKind {
   return item.type === "VISIT_FILE" ? "VISIT_UPLOAD" : "PERSONNEL";
 }
 
+type QueueResponse = {
+  error?: string;
+  ok: boolean;
+  status: number;
+};
+
 function postQueueItem(
   item: OfflineQueueItem,
   onProgress: (progress: number) => void,
@@ -292,6 +298,10 @@ function postQueueItem(
       ok: false,
       status: 422,
     });
+  }
+
+  if (item.type === "NOTE" && files.length > 0) {
+    return postPersonnelNoteWithFiles(item, files, onProgress);
   }
 
   const formData = new FormData();
@@ -335,18 +345,84 @@ function postQueueItem(
     formData.append("files", file, fileName);
   }
 
-  return new Promise<{ error?: string; ok: boolean; status: number }>(
+  const useJson = jsonBody !== null;
+  return sendQueueRequest(
+    endpoint,
+    useJson ? JSON.stringify(jsonBody) : formData,
+    useJson ? { "Content-Type": "application/json" } : {},
+    onProgress,
+  );
+}
+
+async function postPersonnelNoteWithFiles(
+  item: PersonnelOfflineQueueItem,
+  files: Blob[],
+  onProgress: (progress: number) => void,
+): Promise<QueueResponse> {
+  const noteResponse = await sendQueueRequest(
+    "/api/offline/sync",
+    JSON.stringify({
+      clientItemId: item.id,
+      type: "NOTE",
+      taskId: item.taskId,
+      createdAt: item.createdAt,
+      note: item.note,
+    }),
+    { "Content-Type": "application/json" },
+    (progress) => onProgress(Math.round(progress * 0.05)),
+  );
+
+  if (!noteResponse.ok) {
+    return noteResponse;
+  }
+
+  for (const [index, file] of files.entries()) {
+    const fileName =
+      file instanceof File && file.name
+        ? file.name
+        : `bekleyen-dosya-${index + 1}`;
+    const fileResponse = await sendQueueRequest(
+      "/api/offline/sync",
+      file,
+      {
+        "Content-Type": "application/octet-stream",
+        "X-Kagu-Upload-Kind": "personnel-note-file",
+        "X-Kagu-Client-Item-Id": `${item.id}:file:${index}`,
+        "X-Kagu-Task-Id": item.taskId,
+        "X-Kagu-File-Name": encodeURIComponent(fileName),
+        "X-Kagu-Mime-Type": encodeURIComponent(
+          file.type || "application/octet-stream",
+        ),
+      },
+      (progress) => {
+        const completedShare = index / files.length;
+        const currentShare = progress / 100 / files.length;
+        onProgress(Math.min(96, Math.round(5 + (completedShare + currentShare) * 91)));
+      },
+    );
+
+    if (!fileResponse.ok) {
+      return fileResponse;
+    }
+  }
+
+  onProgress(100);
+  return { ok: true, status: 200 };
+}
+
+function sendQueueRequest(
+  endpoint: string,
+  body: XMLHttpRequestBodyInit,
+  headers: Record<string, string>,
+  onProgress: (progress: number) => void,
+) {
+  return new Promise<QueueResponse>(
     (resolve, reject) => {
       const request = new XMLHttpRequest();
       request.open("POST", endpoint);
 
-      const useJson = jsonBody !== null && files.length === 0;
-      if (useJson) {
-        request.setRequestHeader("Content-Type", "application/json");
-      } else if (jsonBody) {
-        for (const [name, value] of Object.entries(jsonBody)) {
-          formData.set(name, value);
-        }
+      for (const [name, value] of Object.entries(headers)) {
+        request.setRequestHeader(name, value);
       }
 
       request.upload.onprogress = (event) => {
@@ -394,7 +470,7 @@ function postQueueItem(
         });
       };
 
-      request.send(useJson ? JSON.stringify(jsonBody) : formData);
+      request.send(body);
     },
   );
 }
