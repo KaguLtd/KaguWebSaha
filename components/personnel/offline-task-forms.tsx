@@ -458,7 +458,7 @@ export function OfflineNoteForm({
   return (
     <form aria-busy={isSubmitting} className="w-full text-left" onSubmit={handleSubmit}>
       <input name="taskId" type="hidden" value={taskId} />
-      <fieldset>{children}</fieldset>
+      <fieldset disabled={isSubmitting}>{children}</fieldset>
       <PendingNotice isWorking={isSubmitting} state={state} />
     </form>
   );

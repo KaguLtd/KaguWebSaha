@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 
 import { requireRole } from "@/lib/auth/session";
 import { getDateOnlyRangeInAppTimeZone, getTodayDateOnly } from "@/lib/dates/today";
@@ -9,9 +10,15 @@ import { parseLatitude, parseLongitude } from "@/lib/location/google-maps";
 import { prisma } from "@/lib/db/prisma";
 
 type ProjectUpload = NonNullable<Awaited<ReturnType<typeof saveProjectUpload>>>;
+type PersonnelSyncType = "ARRIVED_SITE" | "LEFT_SITE" | "NOTE";
+type SyncPayload = FormData | Record<string, unknown>;
 
-function readRequiredText(formData: FormData, name: string) {
-  const value = String(formData.get(name) ?? "").trim();
+function readPayloadValue(payload: SyncPayload, name: string) {
+  return payload instanceof FormData ? payload.get(name) : payload[name];
+}
+
+function readRequiredText(payload: SyncPayload, name: string) {
+  const value = String(readPayloadValue(payload, name) ?? "").trim();
 
   if (!value) {
     throw new Error(`${name} is required`);
@@ -20,9 +27,9 @@ function readRequiredText(formData: FormData, name: string) {
   return value;
 }
 
-function readLocation(formData: FormData) {
-  const latitude = parseLatitude(String(formData.get("latitude") ?? ""));
-  const longitude = parseLongitude(String(formData.get("longitude") ?? ""));
+function readLocation(payload: SyncPayload) {
+  const latitude = parseLatitude(String(readPayloadValue(payload, "latitude") ?? ""));
+  const longitude = parseLongitude(String(readPayloadValue(payload, "longitude") ?? ""));
 
   if (latitude === null || longitude === null) {
     return {
@@ -42,6 +49,38 @@ function readLocation(formData: FormData) {
     latitude,
     longitude,
   };
+}
+
+function readFiles(payload: SyncPayload) {
+  if (!(payload instanceof FormData)) {
+    return [];
+  }
+
+  return payload
+    .getAll("files")
+    .filter((value): value is File => value instanceof File && value.size > 0);
+}
+
+async function readSyncPayload(request: Request): Promise<SyncPayload> {
+  const contentType = request.headers.get("content-type")?.toLowerCase() ?? "";
+
+  if (contentType.includes("application/json")) {
+    const payload: unknown = await request.json();
+
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      throw new Error("Gecersiz istek verisi.");
+    }
+
+    return payload as Record<string, unknown>;
+  }
+
+  return request.formData();
+}
+
+function parseSyncType(value: string): PersonnelSyncType | null {
+  return value === "ARRIVED_SITE" || value === "LEFT_SITE" || value === "NOTE"
+    ? value
+    : null;
 }
 
 async function requireAssignedTodayTask(taskId: string, userId: string) {
@@ -94,53 +133,135 @@ async function requireAssignedPastOrTodayTask(taskId: string, userId: string) {
 
 export async function POST(request: Request) {
   const user = await requireRole("PERSONNEL");
+  let claimedClientItemId: string | null = null;
+
   try {
-    const formData = await request.formData();
-    const clientItemId = readRequiredText(formData, "clientItemId");
-    const type = readRequiredText(formData, "type");
-    const taskId = readRequiredText(formData, "taskId");
+    const payload = await readSyncPayload(request);
+    const clientItemId = readRequiredText(payload, "clientItemId");
+    const requestedType = readRequiredText(payload, "type");
+    const taskId = readRequiredText(payload, "taskId");
+    const type = parseSyncType(requestedType);
 
-    const existing = await prisma.offlinePendingItem.findUnique({
-      where: {
-        clientItemId,
-      },
-    });
+    if (!type) {
+      return NextResponse.json(
+        { error: "Gecersiz offline kayit tipi." },
+        { status: 400 },
+      );
+    }
 
-    if (existing?.status === "SYNCED") {
+    const claim = await claimOfflineItem(user.id, clientItemId, type, taskId);
+
+    if (claim === "duplicate") {
       return NextResponse.json({ ok: true, duplicate: true });
     }
 
+    if (claim !== "claimed") {
+      return NextResponse.json(
+        {
+          error:
+            claim === "processing"
+              ? "Kayit baska bir ekranda gonderiliyor; cihazda korunup tekrar denenecek."
+              : "Bu kayit kimligi baska bir islemde kullanilmis.",
+        },
+        { status: 409 },
+      );
+    }
+
+    claimedClientItemId = clientItemId;
+
     if (type === "ARRIVED_SITE") {
-      await syncArriveSite(user.id, clientItemId, taskId, formData);
+      await syncArriveSite(user.id, clientItemId, taskId, payload);
       return NextResponse.json({ ok: true });
     }
 
     if (type === "LEFT_SITE") {
-      await syncLeaveSite(user.id, clientItemId, taskId, formData);
+      await syncLeaveSite(user.id, clientItemId, taskId, payload);
       return NextResponse.json({ ok: true });
     }
 
-    if (type === "NOTE") {
-      await syncNote(user.id, clientItemId, taskId, formData);
-      return NextResponse.json({ ok: true });
-    }
-
-    return NextResponse.json(
-      { error: "Gecersiz offline kayit tipi." },
-      { status: 400 },
-    );
+    await syncNote(user.id, clientItemId, taskId, payload);
+    return NextResponse.json({ ok: true });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Islem kaydedilemedi.";
+    if (claimedClientItemId) {
+      await prisma.offlinePendingItem
+        .deleteMany({
+          where: {
+            clientItemId: claimedClientItemId,
+            userId: user.id,
+            status: "PENDING",
+          },
+        })
+        .catch(() => undefined);
+    }
+
+    const responseError = getPersonnelSyncError(error);
     return NextResponse.json(
-      { error: message },
-      { status: isPersonnelRequestError(message) ? 400 : 500 },
+      { error: responseError.message },
+      { status: responseError.status },
     );
   }
+}
+
+async function claimOfflineItem(
+  userId: string,
+  clientItemId: string,
+  type: PersonnelSyncType,
+  taskId: string,
+) {
+  try {
+    await prisma.offlinePendingItem.create({
+      data: {
+        userId,
+        clientItemId,
+        type,
+        status: "PENDING",
+        payload: { taskId },
+      },
+    });
+
+    return "claimed" as const;
+  } catch (error) {
+    if (
+      !(error instanceof Prisma.PrismaClientKnownRequestError) ||
+      error.code !== "P2002"
+    ) {
+      throw error;
+    }
+
+    const existing = await prisma.offlinePendingItem.findUnique({
+      where: { clientItemId },
+      select: { status: true, type: true, userId: true },
+    });
+
+    if (!existing || existing.userId !== userId || existing.type !== type) {
+      return "conflict" as const;
+    }
+
+    return existing.status === "SYNCED" ? ("duplicate" as const) : ("processing" as const);
+  }
+}
+
+function getPersonnelSyncError(error: unknown) {
+  const message = error instanceof Error ? error.message : "Islem kaydedilemedi.";
+  const normalized = message.toLowerCase();
+
+  if (normalized.includes("formdata") || normalized.includes("multipart")) {
+    return {
+      message: "Istek verisi okunamadi. Kayit cihazda korundu ve tekrar denenecek.",
+      status: 503,
+    };
+  }
+
+  return {
+    message,
+    status: isPersonnelRequestError(message) ? 400 : 500,
+  };
 }
 
 function isPersonnelRequestError(message: string) {
   return [
     " is required",
+    "Gecersiz istek verisi.",
     "Gecersiz offline kayit tipi.",
     "Gorev bulunamadi",
     "Önce aktif sahadaki görevi kapatmalısın.",
@@ -153,10 +274,10 @@ async function syncArriveSite(
   userId: string,
   clientItemId: string,
   taskId: string,
-  formData: FormData,
+  payload: SyncPayload,
 ) {
   const task = await requireAssignedTodayTask(taskId, userId);
-  const { latitude, longitude } = readLocation(formData);
+  const { latitude, longitude } = readLocation(payload);
   const now = new Date();
 
   await prisma.$transaction(async (tx) => {
@@ -181,24 +302,6 @@ async function syncArriveSite(
     if (activeTask) {
       throw new Error("Önce aktif sahadaki görevi kapatmalısın.");
     }
-
-    await tx.offlinePendingItem.upsert({
-      where: {
-        clientItemId,
-      },
-      create: {
-        userId,
-        clientItemId,
-        type: "ARRIVED_SITE",
-        status: "PENDING",
-        payload: {
-          taskId,
-          latitude,
-          longitude,
-        },
-      },
-      update: {},
-    });
 
     await tx.dailyTask.update({
       where: {
@@ -265,10 +368,10 @@ async function syncLeaveSite(
   userId: string,
   clientItemId: string,
   taskId: string,
-  formData: FormData,
+  payload: SyncPayload,
 ) {
   const task = await requireAssignedTodayTask(taskId, userId);
-  const { latitude, longitude } = readLocation(formData);
+  const { latitude, longitude } = readLocation(payload);
   const now = new Date();
   const durationMinutes = task.arrivedAt
     ? Math.max(0, Math.round((now.getTime() - task.arrivedAt.getTime()) / 60000))
@@ -294,24 +397,6 @@ async function syncLeaveSite(
     if (!todayNote) {
       throw new Error("Bugün yaptıklarının notunu yaz!");
     }
-
-    await tx.offlinePendingItem.upsert({
-      where: {
-        clientItemId,
-      },
-      create: {
-        userId,
-        clientItemId,
-        type: "LEFT_SITE",
-        status: "PENDING",
-        payload: {
-          taskId,
-          latitude,
-          longitude,
-        },
-      },
-      update: {},
-    });
 
     await tx.dailyTask.update({
       where: {
@@ -379,13 +464,11 @@ async function syncNote(
   userId: string,
   clientItemId: string,
   taskId: string,
-  formData: FormData,
+  payload: SyncPayload,
 ) {
-  const note = readRequiredText(formData, "note");
+  const note = readRequiredText(payload, "note");
   const task = await requireAssignedPastOrTodayTask(taskId, userId);
-  const files = formData
-    .getAll("files")
-    .filter((value): value is File => value instanceof File && value.size > 0);
+  const files = readFiles(payload);
   const uploads: ProjectUpload[] = [];
   const now = new Date();
 
@@ -398,24 +481,6 @@ async function syncNote(
   }
 
   await prisma.$transaction(async (tx) => {
-    await tx.offlinePendingItem.upsert({
-      where: {
-        clientItemId,
-      },
-      create: {
-        userId,
-        clientItemId,
-        type: "NOTE",
-        status: "PENDING",
-        payload: {
-          taskId,
-          note,
-          fileCount: uploads.length,
-        },
-      },
-      update: {},
-    });
-
     await tx.taskEvent.create({
       data: {
         dailyTaskId: task.id,

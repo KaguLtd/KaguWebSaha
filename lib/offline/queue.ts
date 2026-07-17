@@ -295,6 +295,7 @@ function postQueueItem(
   }
 
   const formData = new FormData();
+  let jsonBody: Record<string, string> | null = null;
   let endpoint: string;
 
   if (item.type === "VISIT_FILE") {
@@ -307,18 +308,24 @@ function postQueueItem(
     }
   } else {
     endpoint = "/api/offline/sync";
-    formData.set("clientItemId", item.id);
-    formData.set("type", item.type);
-    formData.set("taskId", item.taskId);
-    formData.set("createdAt", item.createdAt);
+    jsonBody = {
+      clientItemId: item.id,
+      type: item.type,
+      taskId: item.taskId,
+      createdAt: item.createdAt,
+    };
     if (item.latitude && item.longitude) {
-      formData.set("latitude", item.latitude);
-      formData.set("longitude", item.longitude);
+      jsonBody.latitude = item.latitude;
+      jsonBody.longitude = item.longitude;
     }
   }
 
   if (item.note) {
-    formData.set("note", item.note);
+    if (jsonBody) {
+      jsonBody.note = item.note;
+    } else {
+      formData.set("note", item.note);
+    }
   }
 
   for (const [index, file] of files.entries()) {
@@ -332,6 +339,15 @@ function postQueueItem(
     (resolve, reject) => {
       const request = new XMLHttpRequest();
       request.open("POST", endpoint);
+
+      const useJson = jsonBody !== null && files.length === 0;
+      if (useJson) {
+        request.setRequestHeader("Content-Type", "application/json");
+      } else if (jsonBody) {
+        for (const [name, value] of Object.entries(jsonBody)) {
+          formData.set(name, value);
+        }
+      }
 
       request.upload.onprogress = (event) => {
         if (event.lengthComputable) {
@@ -378,7 +394,7 @@ function postQueueItem(
         });
       };
 
-      request.send(formData);
+      request.send(useJson ? JSON.stringify(jsonBody) : formData);
     },
   );
 }
