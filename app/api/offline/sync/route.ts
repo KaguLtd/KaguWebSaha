@@ -16,11 +16,15 @@ function readPayloadValue(payload: SyncPayload, name: string) {
   return payload instanceof FormData ? payload.get(name) : payload[name];
 }
 
-function readRequiredText(payload: SyncPayload, name: string) {
+function readRequiredText(
+  payload: SyncPayload,
+  name: string,
+  errorMessage = `${name} is required`,
+) {
   const value = String(readPayloadValue(payload, name) ?? "").trim();
 
   if (!value) {
-    throw new Error(`${name} is required`);
+    throw new Error(errorMessage);
   }
 
   return value;
@@ -135,8 +139,12 @@ export async function POST(request: Request) {
 
   try {
     const payload = await readSyncPayload(request);
-    const requestedType = readRequiredText(payload, "type");
-    const taskId = readRequiredText(payload, "taskId");
+    const requestedType = readRequiredText(
+      payload,
+      "type",
+      "Personel kayit tipi eksik.",
+    );
+    const taskId = readRequiredText(payload, "taskId", "Gorev bilgisi eksik.");
     const type = parseSyncType(requestedType);
 
     if (!type) {
@@ -187,6 +195,9 @@ function getPersonnelSyncError(error: unknown) {
 function isPersonnelRequestError(message: string) {
   return [
     " is required",
+    "Personel kayit tipi eksik.",
+    "Gorev bilgisi eksik.",
+    "Not alani bos birakilamaz.",
     "Gecersiz istek verisi.",
     "Gecersiz personel kayit tipi.",
     "Gorev bulunamadi",
@@ -367,7 +378,7 @@ async function syncNote(
   taskId: string,
   payload: SyncPayload,
 ) {
-  const note = readRequiredText(payload, "note");
+  const note = readRequiredText(payload, "note", "Not alani bos birakilamaz.");
   const task = await requireAssignedPastOrTodayTask(taskId, userId);
   const files = readFiles(payload);
   const uploads: ProjectUpload[] = [];

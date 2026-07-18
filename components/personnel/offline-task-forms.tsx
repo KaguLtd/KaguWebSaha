@@ -30,12 +30,20 @@ function useSubmissionState() {
 async function submitPersonnelEvent(
   type: PersonnelEventType,
   form: HTMLFormElement,
+  formData: FormData,
   setMessage: (message: string) => void,
   setProgress: (progress: number | null) => void,
 ) {
-  await refreshFormLocation(form);
+  if (type !== "NOTE") {
+    await refreshFormLocation(form, formData);
+  }
 
-  const formData = new FormData(form);
+  if (type === "NOTE" && !String(formData.get("note") ?? "").trim()) {
+    setProgress(null);
+    setMessage("Not alanı boş bırakılamaz.");
+    return "failed";
+  }
+
   let files = formData
     .getAll("files")
     .filter((value): value is File => value instanceof File && value.size > 0);
@@ -169,7 +177,7 @@ function postPersonnelEvent(
   });
 }
 
-function refreshFormLocation(form: HTMLFormElement) {
+function refreshFormLocation(form: HTMLFormElement, formData: FormData) {
   if (!window.isSecureContext || !("geolocation" in navigator)) {
     return Promise.resolve();
   }
@@ -182,10 +190,12 @@ function refreshFormLocation(form: HTMLFormElement) {
 
         if (latitude instanceof HTMLInputElement) {
           latitude.value = String(position.coords.latitude);
+          formData.set("latitude", latitude.value);
         }
 
         if (longitude instanceof HTMLInputElement) {
           longitude.value = String(position.coords.longitude);
+          formData.set("longitude", longitude.value);
         }
 
         resolve();
@@ -224,6 +234,8 @@ export function PersonnelArriveForm({
       return;
     }
 
+    // Disabled kontroller FormData'ya girmez; formu isSubmitting'den once dondur.
+    const formData = new FormData(form);
     submittingRef.current = true;
     setIsSubmitting(true);
     setState((current) => ({
@@ -235,6 +247,7 @@ export function PersonnelArriveForm({
       const result = await submitPersonnelEvent(
         "ARRIVED_SITE",
         form,
+        formData,
         (message) => setState((current) => ({ ...current, message })),
         (progress) => setState((current) => ({ ...current, progress })),
       );
@@ -328,6 +341,8 @@ export function PersonnelLeaveForm({
       return;
     }
 
+    // Disabled kontroller FormData'ya girmez; formu isSubmitting'den once dondur.
+    const formData = new FormData(form);
     submittingRef.current = true;
     setIsSubmitting(true);
     setState((current) => ({
@@ -339,6 +354,7 @@ export function PersonnelLeaveForm({
       const result = await submitPersonnelEvent(
         "LEFT_SITE",
         form,
+        formData,
         (message) => setState((current) => ({ ...current, message })),
         (progress) => setState((current) => ({ ...current, progress })),
       );
@@ -404,6 +420,8 @@ export function PersonnelNoteForm({
       return;
     }
 
+    // Not ve dosyalari fieldset kapanmadan once tek istek icin dondur.
+    const formData = new FormData(form);
     submittingRef.current = true;
     setIsSubmitting(true);
     setState((current) => ({
@@ -415,6 +433,7 @@ export function PersonnelNoteForm({
       const result = await submitPersonnelEvent(
         "NOTE",
         form,
+        formData,
         (message) => setState((current) => ({ ...current, message })),
         (progress) => setState((current) => ({ ...current, progress })),
       );
