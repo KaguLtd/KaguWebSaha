@@ -2,22 +2,13 @@
 
 import { createClientId } from "@/lib/offline/client-id";
 
-export type OfflineItemType = "ARRIVED_SITE" | "LEFT_SITE" | "NOTE";
-export type OfflineQueueKind = "PERSONNEL" | "VISIT_UPLOAD";
+export type OfflineQueueKind = "VISIT_UPLOAD";
 
 type QueueItemBase = {
   id: string;
   files?: File[];
   expectedFileCount?: number;
   createdAt: string;
-};
-
-export type PersonnelOfflineQueueItem = QueueItemBase & {
-  type: OfflineItemType;
-  taskId: string;
-  note?: string;
-  latitude?: string;
-  longitude?: string;
 };
 
 export type VisitUploadQueueItem = QueueItemBase & {
@@ -27,7 +18,7 @@ export type VisitUploadQueueItem = QueueItemBase & {
   note?: string;
 };
 
-export type OfflineQueueItem = PersonnelOfflineQueueItem | VisitUploadQueueItem;
+export type OfflineQueueItem = VisitUploadQueueItem;
 
 export type OfflineSyncProgress = {
   current: number;
@@ -106,12 +97,6 @@ async function withStore<T>(
   });
 }
 
-export async function enqueueOfflineItem(
-  item: Omit<PersonnelOfflineQueueItem, "id" | "createdAt">,
-) {
-  return addQueueItem(item);
-}
-
 export async function enqueueVisitUpload(
   item: Omit<VisitUploadQueueItem, "id" | "createdAt" | "type">,
 ) {
@@ -148,8 +133,9 @@ export async function replaceOfflineItemFiles(id: string, files: File[]) {
 }
 
 export async function listOfflineItems(kinds?: OfflineQueueKind[]) {
-  const items =
-    (await withStore<OfflineQueueItem[]>("readonly", (store) => store.getAll())) ?? [];
+  const storedItems =
+    (await withStore<unknown[]>("readonly", (store) => store.getAll())) ?? [];
+  const items = storedItems.filter(isVisitUploadQueueItem);
   const allowedKinds = kinds ? new Set(kinds) : null;
 
   return items
@@ -157,12 +143,23 @@ export async function listOfflineItems(kinds?: OfflineQueueKind[]) {
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 }
 
+function isVisitUploadQueueItem(item: unknown): item is VisitUploadQueueItem {
+  return Boolean(
+    item &&
+      typeof item === "object" &&
+      "type" in item &&
+      item.type === "VISIT_FILE" &&
+      "projectId" in item &&
+      typeof item.projectId === "string",
+  );
+}
+
 export async function deleteOfflineItem(id: string) {
   await withStore("readwrite", (store) => store.delete(id));
 }
 
 export function syncOfflineItems(options: SyncOptions = {}) {
-  const kinds = options.kinds ?? ["PERSONNEL", "VISIT_UPLOAD"];
+  const kinds = options.kinds ?? ["VISIT_UPLOAD"];
   const syncKey = [...kinds].sort().join(",");
   const currentSync = activeSyncs.get(syncKey);
 
@@ -273,8 +270,8 @@ async function runSync(
   };
 }
 
-function getQueueItemKind(item: OfflineQueueItem): OfflineQueueKind {
-  return item.type === "VISIT_FILE" ? "VISIT_UPLOAD" : "PERSONNEL";
+function getQueueItemKind(_item: OfflineQueueItem): OfflineQueueKind {
+  return "VISIT_UPLOAD";
 }
 
 type QueueResponse = {
@@ -300,42 +297,16 @@ function postQueueItem(
     });
   }
 
-  if (item.type === "NOTE" && files.length > 0) {
-    return postPersonnelNoteWithFiles(item, files, onProgress);
-  }
-
   const formData = new FormData();
-  let jsonBody: Record<string, string> | null = null;
-  let endpoint: string;
-
-  if (item.type === "VISIT_FILE") {
-    endpoint = "/api/admin/visits";
-    formData.set("clientItemId", item.id);
-    formData.set("operation", "file");
-    formData.set("projectId", item.projectId);
-    if (item.projectVisitId) {
-      formData.set("projectVisitId", item.projectVisitId);
-    }
-  } else {
-    endpoint = "/api/offline/sync";
-    jsonBody = {
-      clientItemId: item.id,
-      type: item.type,
-      taskId: item.taskId,
-      createdAt: item.createdAt,
-    };
-    if (item.latitude && item.longitude) {
-      jsonBody.latitude = item.latitude;
-      jsonBody.longitude = item.longitude;
-    }
+  formData.set("clientItemId", item.id);
+  formData.set("operation", "file");
+  formData.set("projectId", item.projectId);
+  if (item.projectVisitId) {
+    formData.set("projectVisitId", item.projectVisitId);
   }
 
   if (item.note) {
-    if (jsonBody) {
-      jsonBody.note = item.note;
-    } else {
-      formData.set("note", item.note);
-    }
+    formData.set("note", item.note);
   }
 
   for (const [index, file] of files.entries()) {
@@ -345,69 +316,12 @@ function postQueueItem(
     formData.append("files", file, fileName);
   }
 
-  const useJson = jsonBody !== null;
   return sendQueueRequest(
-    endpoint,
-    useJson ? JSON.stringify(jsonBody) : formData,
-    useJson ? { "Content-Type": "application/json" } : {},
+    "/api/admin/visits",
+    formData,
+    {},
     onProgress,
   );
-}
-
-async function postPersonnelNoteWithFiles(
-  item: PersonnelOfflineQueueItem,
-  files: Blob[],
-  onProgress: (progress: number) => void,
-): Promise<QueueResponse> {
-  const noteResponse = await sendQueueRequest(
-    "/api/offline/sync",
-    JSON.stringify({
-      clientItemId: item.id,
-      type: "NOTE",
-      taskId: item.taskId,
-      createdAt: item.createdAt,
-      note: item.note,
-    }),
-    { "Content-Type": "application/json" },
-    (progress) => onProgress(Math.round(progress * 0.05)),
-  );
-
-  if (!noteResponse.ok) {
-    return noteResponse;
-  }
-
-  for (const [index, file] of files.entries()) {
-    const fileName =
-      file instanceof File && file.name
-        ? file.name
-        : `bekleyen-dosya-${index + 1}`;
-    const fileResponse = await sendQueueRequest(
-      "/api/offline/sync",
-      file,
-      {
-        "Content-Type": "application/octet-stream",
-        "X-Kagu-Upload-Kind": "personnel-note-file",
-        "X-Kagu-Client-Item-Id": `${item.id}:file:${index}`,
-        "X-Kagu-Task-Id": item.taskId,
-        "X-Kagu-File-Name": encodeURIComponent(fileName),
-        "X-Kagu-Mime-Type": encodeURIComponent(
-          file.type || "application/octet-stream",
-        ),
-      },
-      (progress) => {
-        const completedShare = index / files.length;
-        const currentShare = progress / 100 / files.length;
-        onProgress(Math.min(96, Math.round(5 + (completedShare + currentShare) * 91)));
-      },
-    );
-
-    if (!fileResponse.ok) {
-      return fileResponse;
-    }
-  }
-
-  onProgress(100);
-  return { ok: true, status: 200 };
 }
 
 function sendQueueRequest(

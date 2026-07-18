@@ -4,91 +4,31 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 
 import {
-  enqueueOfflineItem,
-  listOfflineItems,
-  replaceOfflineItemFiles,
-  syncOfflineItems,
-  type OfflineItemType,
-} from "@/lib/offline/queue";
-import {
   isCompressibleImage,
   prepareFilesForUpload,
 } from "@/lib/client/image-compression";
 
-type SyncState = {
-  pending: number;
+type PersonnelEventType = "ARRIVED_SITE" | "LEFT_SITE" | "NOTE";
+
+type SubmissionState = {
   message: string;
   progress: number | null;
 };
 
-function useOfflineSync() {
-  const [state, setState] = useState<SyncState>({
-    pending: 0,
+function useSubmissionState() {
+  const [state, setState] = useState<SubmissionState>({
     message: "",
     progress: null,
   });
-  const router = useRouter();
-
-  async function refreshPending() {
-    const items = await listOfflineItems(["PERSONNEL"]);
-    setState((current) => ({
-      ...current,
-      pending: items.length,
-    }));
-  }
-
-  async function syncNow() {
-    const result = await syncOfflineItems({
-      kinds: ["PERSONNEL"],
-      onProgress: ({ current, progress, total }) => {
-        setState((currentState) => ({
-          ...currentState,
-          message: `${current}/${total} kayıt yükleniyor...`,
-          progress,
-        }));
-      },
-    });
-    setState({
-      pending: result.remaining,
-      progress: null,
-      message:
-        result.failedIds.length > 0
-          ? result.error || "Önceki kayıtlarınız yüklenemedi!"
-          : result.error && result.remaining > 0
-          ? result.error
-          : result.synced > 0
-          ? `${result.synced} bekleyen kayit gonderildi.`
-          : result.remaining > 0
-            ? `${result.remaining} kayit bekliyor.`
-            : "",
-    });
-
-    if (result.synced > 0) {
-      router.refresh();
-    }
-  }
-
-  useEffect(() => {
-    refreshPending();
-    syncNow();
-
-    window.addEventListener("online", syncNow);
-
-    return () => {
-      window.removeEventListener("online", syncNow);
-    };
-  }, []);
 
   return {
     state,
-    refreshPending,
-    syncNow,
     setState,
   };
 }
 
-async function submitOrQueue(
-  type: OfflineItemType,
+async function submitPersonnelEvent(
+  type: PersonnelEventType,
   form: HTMLFormElement,
   setMessage: (message: string) => void,
   setProgress: (progress: number | null) => void,
@@ -96,30 +36,14 @@ async function submitOrQueue(
   await refreshFormLocation(form);
 
   const formData = new FormData(form);
-  const taskId = String(formData.get("taskId") ?? "");
-  const note = String(formData.get("note") ?? "");
-  const latitude = String(formData.get("latitude") ?? "");
-  const longitude = String(formData.get("longitude") ?? "");
   let files = formData
     .getAll("files")
     .filter((value): value is File => value instanceof File && value.size > 0);
   const hasFiles = files.length > 0;
-  let queuedItem;
 
-  try {
-    queuedItem = await enqueueOfflineItem({
-      type,
-      taskId,
-      note: note || undefined,
-      latitude: latitude || undefined,
-      longitude: longitude || undefined,
-      files,
-    });
-  } catch {
+  if (!navigator.onLine) {
     setProgress(null);
-    setMessage(
-      "Kayıt cihazdaki güvenli kuyruğa alınamadı. Depolama alanını kontrol edip tekrar deneyin.",
-    );
+    setMessage("İnternet bağlantısı yok. Bağlantı geldikten sonra tekrar deneyin.");
     return "failed";
   }
 
@@ -132,7 +56,7 @@ async function submitOrQueue(
       setMessage("Fotoğraflar yükleme için hazırlanıyor...");
     } else if (hasVideo) {
       setMessage(
-        "Video yüklemesi uzun sürebilir; ekran kapansa da tekrar açıldığında devam eder.",
+        "Video yüklemesi uzun sürebilir. Yükleme bitene kadar bu ekranı kapatmayın.",
       );
     }
 
@@ -140,57 +64,109 @@ async function submitOrQueue(
       setProgress(8);
     }
 
-    files = await prepareFilesForUpload(files);
-    await replaceOfflineItemFiles(queuedItem.id, files);
+    try {
+      files = await prepareFilesForUpload(files);
+    } catch {
+      setProgress(null);
+      setMessage("Dosyalar yüklemeye hazırlanamadı. Tekrar seçip deneyin.");
+      return "failed";
+    }
+    formData.delete("files");
+
+    for (const file of files) {
+      formData.append("files", file, file.name);
+    }
 
     if (hasCompressibleImage && hasVideo) {
       setMessage(
-        "Video yüklemesi uzun sürebilir; ekran kapansa da tekrar açıldığında devam eder.",
+        "Video yüklemesi uzun sürebilir. Yükleme bitene kadar bu ekranı kapatmayın.",
       );
       setProgress(10);
     }
   }
 
-  if (!navigator.onLine) {
-    setProgress(null);
-    setMessage("Internet yok. Islem bekleyen kayitlara alindi.");
-    return "queued";
-  }
+  formData.set("type", type);
 
   if (type === "NOTE" && hasFiles) {
     setMessage("Yükleniyor...");
     setProgress(12);
   }
 
-  const result = await syncOfflineItems({
-    kinds: ["PERSONNEL"],
-    onProgress: ({ current, progress, total }) => {
-      setProgress(progress);
-      setMessage(`${current}/${total} kayıt yükleniyor...`);
-    },
-  });
+  let response: DirectResponse;
 
-  if (result.failedIds.includes(queuedItem.id)) {
+  try {
+    response = await postPersonnelEvent(formData, setProgress);
+  } catch {
     setProgress(null);
-    setMessage(result.error || "İşlem kaydedilemedi.");
+    setMessage("Sunucuya ulaşılamadı. Bağlantıyı kontrol edip tekrar deneyin.");
     return "failed";
   }
 
-  const isStillQueued = (await listOfflineItems(["PERSONNEL"])).some(
-    (item) => item.id === queuedItem.id,
-  );
-
-  if (isStillQueued) {
+  if (!response.ok) {
     setProgress(null);
-    setMessage(
-      result.error || "Bağlantı kesildi. Kayıt cihazda saklandı ve tekrar denenecek.",
-    );
-    return "queued";
+    setMessage(response.error || "İşlem kaydedilemedi. Tekrar deneyin.");
+    return "failed";
   }
 
   setProgress(100);
-  setMessage("Islem kaydedildi.");
+  setMessage("İşlem kaydedildi.");
   return "synced";
+}
+
+type DirectResponse = {
+  error?: string;
+  ok: boolean;
+  status: number;
+};
+
+function postPersonnelEvent(
+  formData: FormData,
+  setProgress: (progress: number | null) => void,
+) {
+  return new Promise<DirectResponse>((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("POST", "/api/offline/sync");
+
+    request.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        const uploadProgress = Math.round((event.loaded / event.total) * 80);
+        setProgress(Math.min(92, Math.max(12, 12 + uploadProgress)));
+      }
+    };
+    request.onerror = () => reject(new Error("Upload failed"));
+    request.onload = () => {
+      let payload: { error?: string; ok?: boolean } = {};
+
+      try {
+        payload = JSON.parse(request.responseText || "{}");
+      } catch {
+        // API başarıları JSON ve ok: true döndürür.
+      }
+
+      const responsePath = request.responseURL
+        ? new URL(request.responseURL, window.location.href).pathname
+        : "";
+      const contentType = request.getResponseHeader("content-type") ?? "";
+      const ok =
+        request.status >= 200 &&
+        request.status < 300 &&
+        responsePath !== "/login" &&
+        contentType.includes("application/json") &&
+        payload.ok === true;
+
+      setProgress(ok ? 96 : null);
+      resolve({
+        error:
+          responsePath === "/login"
+            ? "Oturum süresi doldu. Giriş yaptıktan sonra tekrar deneyin."
+            : payload.error,
+        ok,
+        status: responsePath === "/login" ? 401 : request.status,
+      });
+    };
+
+    request.send(formData);
+  });
 }
 
 function refreshFormLocation(form: HTMLFormElement) {
@@ -224,7 +200,7 @@ function refreshFormLocation(form: HTMLFormElement) {
   });
 }
 
-export function OfflineArriveForm({
+export function PersonnelArriveForm({
   children,
   disabled,
   disabledMessage,
@@ -236,7 +212,7 @@ export function OfflineArriveForm({
   taskId: string;
 }>) {
   const router = useRouter();
-  const { state, refreshPending, setState } = useOfflineSync();
+  const { state, setState } = useSubmissionState();
   const submittingRef = useRef(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -256,14 +232,12 @@ export function OfflineArriveForm({
       progress: 6,
     }));
     try {
-      const result = await submitOrQueue(
+      const result = await submitPersonnelEvent(
         "ARRIVED_SITE",
         form,
         (message) => setState((current) => ({ ...current, message })),
         (progress) => setState((current) => ({ ...current, progress })),
       );
-      await refreshPending();
-
       if (result === "synced") {
         router.refresh();
       }
@@ -280,10 +254,13 @@ export function OfflineArriveForm({
       onSubmit={handleSubmit}
     >
       <input name="taskId" type="hidden" value={taskId} />
-      <fieldset className="flex w-full flex-col items-center" disabled={disabled}>
+      <fieldset
+        className="flex w-full flex-col items-center"
+        disabled={disabled || isSubmitting}
+      >
         {children}
       </fieldset>
-      <PendingNotice
+      <SubmissionNotice
         isWorking={isSubmitting}
         state={{
           ...state,
@@ -294,7 +271,7 @@ export function OfflineArriveForm({
   );
 }
 
-export function OfflineLeaveForm({
+export function PersonnelLeaveForm({
   children,
   hasTodayNote,
   taskId,
@@ -304,7 +281,7 @@ export function OfflineLeaveForm({
   taskId: string;
 }>) {
   const router = useRouter();
-  const { state, refreshPending, setState } = useOfflineSync();
+  const { state, setState } = useSubmissionState();
   const submittingRef = useRef(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [confirmSeconds, setConfirmSeconds] = useState(0);
@@ -359,14 +336,12 @@ export function OfflineLeaveForm({
       progress: 6,
     }));
     try {
-      const result = await submitOrQueue(
+      const result = await submitPersonnelEvent(
         "LEFT_SITE",
         form,
         (message) => setState((current) => ({ ...current, message })),
         (progress) => setState((current) => ({ ...current, progress })),
       );
-      await refreshPending();
-
       if (result === "synced") {
         router.refresh();
       }
@@ -404,12 +379,12 @@ export function OfflineLeaveForm({
           )}
         </button>
       </fieldset>
-      <PendingNotice isWorking={isSubmitting} state={state} />
+      <SubmissionNotice isWorking={isSubmitting} state={state} />
     </form>
   );
 }
 
-export function OfflineNoteForm({
+export function PersonnelNoteForm({
   children,
   taskId,
 }: Readonly<{
@@ -417,7 +392,7 @@ export function OfflineNoteForm({
   taskId: string;
 }>) {
   const router = useRouter();
-  const { state, refreshPending, setState } = useOfflineSync();
+  const { state, setState } = useSubmissionState();
   const submittingRef = useRef(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -437,14 +412,12 @@ export function OfflineNoteForm({
       progress: 6,
     }));
     try {
-      const result = await submitOrQueue(
+      const result = await submitPersonnelEvent(
         "NOTE",
         form,
         (message) => setState((current) => ({ ...current, message })),
         (progress) => setState((current) => ({ ...current, progress })),
       );
-      await refreshPending();
-
       if (result === "synced") {
         form.reset();
         router.refresh();
@@ -459,19 +432,19 @@ export function OfflineNoteForm({
     <form aria-busy={isSubmitting} className="w-full text-left" onSubmit={handleSubmit}>
       <input name="taskId" type="hidden" value={taskId} />
       <fieldset disabled={isSubmitting}>{children}</fieldset>
-      <PendingNotice isWorking={isSubmitting} state={state} />
+      <SubmissionNotice isWorking={isSubmitting} state={state} />
     </form>
   );
 }
 
-function PendingNotice({
+function SubmissionNotice({
   isWorking = false,
   state,
 }: {
   isWorking?: boolean;
-  state: SyncState;
+  state: SubmissionState;
 }) {
-  if (!state.message && state.pending === 0) {
+  if (!state.message) {
     return null;
   }
 
@@ -498,7 +471,7 @@ function PendingNotice({
         </div>
       ) : null}
       <div className="relative flex items-center justify-between gap-3">
-        <span>{state.message || `${state.pending} bekleyen kayit var.`}</span>
+        <span>{state.message}</span>
         {showProgress ? (
           <span className="shrink-0 tabular-nums text-muted-foreground/80">
             %{progress}

@@ -6,9 +6,9 @@ import { FilePreviewGrid } from "@/components/files/file-preview";
 import { LocationDescription } from "@/components/location/location-description";
 import { LocationFields } from "@/components/personnel/location-fields";
 import {
-  OfflineArriveForm,
-  OfflineLeaveForm,
-  OfflineNoteForm,
+  PersonnelArriveForm,
+  PersonnelLeaveForm,
+  PersonnelNoteForm,
 } from "@/components/personnel/offline-task-forms";
 import {
   formatDisplayDate,
@@ -129,7 +129,7 @@ export default async function PersonnelTaskDetailPage({
 
           <div className="mt-8 flex justify-center">
             {task.status === "PLANNED" ? (
-              <OfflineArriveForm
+              <PersonnelArriveForm
                 disabled={activeOtherOnSiteTask}
                 disabledMessage="Önce aktif sahadaki görevi kapatmalısın."
                 taskId={task.id}
@@ -142,14 +142,14 @@ export default async function PersonnelTaskDetailPage({
                 >
                   Sahaya Ulaştım
                 </button>
-              </OfflineArriveForm>
+              </PersonnelArriveForm>
             ) : null}
 
             {task.status === "ON_SITE" ? (
               <div className="flex w-full flex-col items-center gap-5">
-                <OfflineLeaveForm hasTodayNote={hasTodayNote} taskId={task.id}>
+                <PersonnelLeaveForm hasTodayNote={hasTodayNote} taskId={task.id}>
                   <LocationFields />
-                </OfflineLeaveForm>
+                </PersonnelLeaveForm>
               </div>
             ) : null}
 
@@ -166,7 +166,7 @@ export default async function PersonnelTaskDetailPage({
           <p className="mt-2 text-sm text-muted-foreground">
             Fotoğraf, PDF, Excel, DWG veya başka dosyalar eklenebilir.
           </p>
-          <OfflineNoteForm taskId={task.id}>
+          <PersonnelNoteForm taskId={task.id}>
             <div className="mt-4 flex flex-col gap-2">
               <label className="text-sm font-medium" htmlFor="note">
                 Not
@@ -197,7 +197,7 @@ export default async function PersonnelTaskDetailPage({
             >
               Kaydet
             </button>
-          </OfflineNoteForm>
+          </PersonnelNoteForm>
         </section>
 
         <section className="rounded-lg border bg-white p-5 shadow-sm">

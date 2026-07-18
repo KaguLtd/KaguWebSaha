@@ -10,7 +10,7 @@ import {
 } from "@/lib/offline/queue";
 
 export function OfflineSyncBoot({
-  kind = "PERSONNEL",
+  kind = "VISIT_UPLOAD",
 }: Readonly<{
   kind?: OfflineQueueKind;
 }>) {

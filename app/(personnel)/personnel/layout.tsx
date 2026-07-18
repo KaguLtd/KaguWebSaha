@@ -1,7 +1,6 @@
 import { logoutAction } from "@/app/(auth)/login/actions";
 import { PendingHeicRefresh } from "@/components/files/pending-heic-refresh";
 import { Button } from "@/components/ui/button";
-import { OfflineSyncBoot } from "@/components/personnel/offline-sync-boot";
 import { requireRole } from "@/lib/auth/session";
 import { completeStaleOnSiteTasks } from "@/lib/tasks/rollover";
 import Link from "next/link";
@@ -40,7 +39,6 @@ export default async function PersonnelLayout({
         </div>
       </header>
       {children}
-      <OfflineSyncBoot />
       <PendingHeicRefresh />
     </div>
   );
