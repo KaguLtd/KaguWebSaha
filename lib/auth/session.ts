@@ -68,7 +68,8 @@ export async function getCurrentUser() {
   });
 
   if (!session || session.expiresAt <= new Date() || !session.user.isActive) {
-    await destroySession();
+    // Reading a session also happens during Server Component rendering, where
+    // cookies are read-only. Logout/login Route Handlers and Actions manage them.
     return null;
   }
 

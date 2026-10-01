@@ -17,7 +17,7 @@ export default async function AdminLayout({
   return (
     <AdminShell user={user}>
       {children}
-      <OfflineSyncBoot kind="VISIT_UPLOAD" />
+      <OfflineSyncBoot kind="VISIT_UPLOAD" userId={user.id} />
       <PendingHeicRefresh />
     </AdminShell>
   );

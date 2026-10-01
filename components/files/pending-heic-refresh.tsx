@@ -1,58 +1,39 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 export function PendingHeicRefresh() {
   const router = useRouter();
-  const hadPending = useRef(false);
-
+  const [failed, setFailed] = useState(0);
   useEffect(() => {
-    let isMounted = true;
-
-    async function checkPendingHeic() {
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout>;
+    let hadPending = false;
+    let version: string | null | undefined;
+    async function check() {
+      let interval = 60_000;
       try {
-        const response = await fetch("/api/files/pending-heic", {
-          cache: "no-store",
-        });
-
-        if (!response.ok) {
-          return;
+        if (document.visibilityState === "visible" && navigator.onLine) {
+          const response = await fetch("/api/files/pending-heic", { cache: "no-store", signal: AbortSignal.timeout(15_000) });
+          if (response.ok && !response.redirected) {
+            const data = await response.json() as { pendingCount: number; failedCount?: number; completedVersion?: string | null };
+            if (!disposed) {
+              setFailed(data.failedCount ?? 0);
+              if ((version !== undefined && data.completedVersion !== version) || (hadPending && data.pendingCount === 0)) router.refresh();
+              version = data.completedVersion;
+              hadPending = data.pendingCount > 0;
+              if (hadPending) interval = 10_000;
+            }
+          }
         }
-
-        const data = (await response.json()) as {
-          completedVersion?: null | string;
-          pendingCount?: number;
-        };
-        const pendingCount = data.pendingCount ?? 0;
-        const completedVersion = data.completedVersion ?? null;
-        const seenVersion = window.sessionStorage.getItem("file-processing-version");
-
-        if (completedVersion && completedVersion !== seenVersion) {
-          window.sessionStorage.setItem("file-processing-version", completedVersion);
-          router.refresh();
-        } else if (hadPending.current && pendingCount === 0) {
-          router.refresh();
-        }
-
-        hadPending.current = pendingCount > 0;
-      } catch {
-        // Polling is best-effort; file processing continues server-side.
-      }
+      } catch { /* Polling resumes without changing an accepted upload's result. */ }
+      finally { if (!disposed) timer = setTimeout(() => { void check(); }, interval); }
     }
-
-    void checkPendingHeic();
-    const interval = window.setInterval(() => {
-      if (isMounted) {
-        void checkPendingHeic();
-      }
-    }, 2500);
-
-    return () => {
-      isMounted = false;
-      window.clearInterval(interval);
-    };
+    const start = () => { clearTimeout(timer); void check(); };
+    start();
+    window.addEventListener("kagu-queue-changed", start);
+    return () => { disposed = true; clearTimeout(timer); window.removeEventListener("kagu-queue-changed", start); };
   }, [router]);
-
-  return null;
+  return failed > 0 ? <div className="mx-auto my-4 max-w-3xl rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status">{failed} dosyanın dönüşümü veya önizlemesi tamamlanamadı. Kaynak dosyalar korunuyor; yönetici Dosya İşleri ekranından tekrar deneyebilir.</div> : null;
 }

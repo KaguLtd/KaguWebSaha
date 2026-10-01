@@ -8,6 +8,7 @@ import { prisma } from "@/lib/db/prisma";
 import { recordProjectUpload } from "@/lib/files/heic-conversion-jobs";
 import { saveProjectUpload } from "@/lib/files/storage";
 import { parseLatitude, parseLongitude } from "@/lib/location/google-maps";
+import { buildAssignmentSnapshots } from "@/lib/teams/assignments";
 
 function readText(formData: FormData, name: string) {
   return String(formData.get(name) ?? "").trim();
@@ -87,17 +88,12 @@ export async function POST(request: Request) {
       const projectId = readRequiredText(formData, "projectId");
       const managerNote = readText(formData, "managerNote");
       const observerNote = readText(formData, "timelineNote");
-      const assigneeIds =
-        user.role === "OBSERVER"
-          ? [user.id]
-          : formData
-              .getAll("assigneeIds")
-              .map(String)
-              .filter(Boolean);
 
       if (!taskDate) {
         throw new Error("Gecersiz tarih.");
       }
+      const assignmentSnapshots = await buildAssignmentSnapshots(formData, taskDate, [], user.role === "OBSERVER" ? user.id : undefined);
+      const assigneeIds = assignmentSnapshots.map((item) => item.userId);
 
       if (user.role === "OBSERVER" && taskDate.getTime() !== getTodayDateOnly().getTime()) {
         throw new Error("Saha kontrol yalnizca bugunun programina kayit ekleyebilir.");
@@ -132,9 +128,7 @@ export async function POST(request: Request) {
           managerNote: managerNote || null,
           createdByUserId: user.id,
           assignees: {
-            create: assigneeIds.map((userId) => ({
-              userId,
-            })),
+            create: assignmentSnapshots,
           },
           events: {
             create: {
@@ -199,13 +193,6 @@ export async function POST(request: Request) {
       const taskId = readRequiredText(formData, "taskId");
       const managerNote = readText(formData, "managerNote");
       const noteToTimeline = readText(formData, "timelineNote");
-      const assigneeIds =
-        user.role === "OBSERVER"
-          ? [user.id]
-          : formData
-              .getAll("assigneeIds")
-              .map(String)
-              .filter(Boolean);
 
       const task = await prisma.dailyTask.findUnique({
         where: {
@@ -269,10 +256,13 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: true, taskId: task.id });
       }
 
+      const assignmentSnapshots = task.status === "PLANNED" ? await buildAssignmentSnapshots(formData, task.taskDate, task.assignees) : task.assignees;
+      const assigneeIds = assignmentSnapshots.map((item) => item.userId);
       await prisma.$transaction(async (tx) => {
         await tx.dailyTask.update({
           where: {
             id: task.id,
+            status: task.status,
           },
           data: {
             managerNote: managerNote || null,
@@ -280,9 +270,7 @@ export async function POST(request: Request) {
               ? {
                   assignees: {
                     deleteMany: {},
-                    create: assigneeIds.map((userId) => ({
-                      userId,
-                    })),
+                    create: assignmentSnapshots.map(({ userId, teamId, teamNameSnapshot, headcountSnapshot, actualHeadcount, workforceKindSnapshot }) => ({ userId, teamId, teamNameSnapshot, headcountSnapshot, actualHeadcount, workforceKindSnapshot })),
                   },
                 }
               : {}),

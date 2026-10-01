@@ -52,6 +52,8 @@ export function UserDrawers({ users }: { users: UserDrawerUser[] }) {
       setDrawer(null);
       setMessage(successMessage);
       router.refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Kullanıcı kaydedilemedi.");
     } finally {
       setIsPending(false);
     }
@@ -156,6 +158,7 @@ export function UserDrawers({ users }: { users: UserDrawerUser[] }) {
         onClose={() => setDrawer(null)}
         title="Kullanici Olustur"
       >
+        {message ? <p role="status" className="mb-3 text-sm text-primary">{message}</p> : null}
         <form
           className="flex flex-col gap-4"
           onSubmit={(event) => {
@@ -179,6 +182,7 @@ export function UserDrawers({ users }: { users: UserDrawerUser[] }) {
         onClose={() => setDrawer(null)}
         title="Kullanici Duzenle"
       >
+        {message ? <p role="status" className="mb-3 text-sm text-primary">{message}</p> : null}
         {selectedUser ? (
           <form
             className="flex flex-col gap-4"
@@ -221,7 +225,7 @@ export function UserDrawers({ users }: { users: UserDrawerUser[] }) {
                     rel="noreferrer"
                     target="_blank"
                   >
-                    Google Maps'te ac
+                    Google Maps&apos;te ac
                   </a>
                 </div>
               ) : (

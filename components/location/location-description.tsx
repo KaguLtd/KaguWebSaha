@@ -17,7 +17,7 @@ export function LocationDescription({ description }: { description: string | nul
       target="_blank"
     >
       <MapPin className="h-4 w-4 shrink-0" aria-hidden="true" />
-      Google Maps'te ac
+      Google Maps&apos;te ac
     </a>
   );
 }

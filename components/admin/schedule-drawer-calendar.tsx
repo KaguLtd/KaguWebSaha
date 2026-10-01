@@ -12,6 +12,8 @@ import {
 import { StatusBadge } from "@/components/admin/status-badge";
 import { Button } from "@/components/ui/button";
 import { Drawer } from "@/components/ui/drawer";
+import { TeamAssigneeFields } from "@/components/admin/team-assignee-fields";
+import type { AssignmentTeamView } from "@/components/admin/team-assignee-fields";
 
 export type ScheduleProject = {
   customerName: string;
@@ -22,6 +24,9 @@ export type ScheduleProject = {
 export type SchedulePerson = {
   fullName: string;
   id: string;
+  teamId?: string | null;
+  teamNameSnapshot?: string | null;
+  headcountSnapshot?: number | null;
 };
 
 export type ScheduleTask = {
@@ -57,6 +62,7 @@ type ScheduleDrawerCalendarProps = {
   days: ScheduleDay[];
   initialSelectedDate: string;
   personnel: SchedulePerson[];
+  teams: AssignmentTeamView[];
   projects: ScheduleProject[];
   tasks: ScheduleTask[];
 };
@@ -69,6 +75,7 @@ export function ScheduleDrawerCalendar({
   days,
   initialSelectedDate,
   personnel,
+  teams,
   projects,
   tasks,
 }: ScheduleDrawerCalendarProps) {
@@ -122,6 +129,8 @@ export function ScheduleDrawerCalendar({
       setDrawer(null);
       setMessage(successMessage);
       router.refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Görev kaydedilemedi.");
     } finally {
       setIsPending(false);
     }
@@ -159,7 +168,7 @@ export function ScheduleDrawerCalendar({
 
             return (
               <div
-                className={`h-36 cursor-pointer border-b border-r p-2 transition hover:bg-primary/5 ${
+                  className={`h-48 min-w-0 cursor-pointer border-b border-r p-2 transition hover:bg-primary/5 ${
                   day.isCurrentMonth ? "bg-white" : "bg-navy/5 text-muted-foreground"
                 }`}
                 key={day.date}
@@ -176,18 +185,19 @@ export function ScheduleDrawerCalendar({
                 <span className="block text-sm font-semibold text-navy">
                   {day.dayNumber}
                 </span>
-                <div className="mt-2 flex h-24 flex-col gap-1 overflow-y-auto overscroll-contain pr-1">
+                <div className="mt-2 flex h-36 flex-col gap-1 overflow-y-auto overscroll-contain pr-1" onClick={(event) => event.stopPropagation()}>
                   {dayTasks.map((task) => (
                     <button
-                      className="min-h-7 shrink-0 truncate rounded-md border border-primary/20 bg-primary/10 px-2 py-1 text-left text-xs font-medium leading-5 text-navy underline-offset-2 transition hover:border-primary/40 hover:bg-primary/15 hover:underline"
+                      className="min-h-8 shrink-0 rounded-md border border-primary/20 bg-primary/10 px-2 py-1 text-left text-xs font-medium leading-4 text-navy underline-offset-2 transition hover:border-primary/40 hover:bg-primary/15 hover:underline"
                       key={task.id}
                       onClick={(event) => {
                         event.stopPropagation();
                         setDrawer({ mode: "edit", taskId: task.id });
                       }}
                       type="button"
+                      title={task.projectName}
                     >
-                      {task.projectName}
+                      <span className="line-clamp-2 break-words">{task.projectName}</span>
                     </button>
                   ))}
                 </div>
@@ -207,8 +217,10 @@ export function ScheduleDrawerCalendar({
         onClose={() => setDrawer(null)}
         title={drawer?.mode === "edit" ? "Gunluk Gorevi Duzenle" : "Gune Gorev Ata"}
       >
+        {message ? <p role="status" className="mb-3 text-sm text-primary">{message}</p> : null}
         {drawer?.mode === "create" ? (
           <CreateTaskForm
+            key={drawer.date}
             currentUserId={currentUserId}
             currentUserRole={currentUserRole}
             date={drawer.date}
@@ -217,12 +229,14 @@ export function ScheduleDrawerCalendar({
               submit(formData, createDailyTaskAction, "Gunluk gorev kaydedildi.")
             }
             personnel={personnel}
+            teams={teams}
             projects={getAvailableProjects(drawer.date, projects, tasks)}
           />
         ) : null}
 
         {drawer?.mode === "edit" && selectedTask ? (
           <EditTaskForm
+            key={selectedTask.id}
             currentUserId={currentUserId}
             currentUserRole={currentUserRole}
             isPending={isPending}
@@ -233,6 +247,7 @@ export function ScheduleDrawerCalendar({
               submit(formData, removeDailyTaskAction, "Gunluk gorev gunden kaldirildi.")
             }
             personnel={personnel}
+            teams={teams}
             task={selectedTask}
           />
         ) : null}
@@ -248,6 +263,7 @@ function CreateTaskForm({
   isPending,
   onSubmit,
   personnel,
+  teams,
   projects,
 }: {
   currentUserId: string;
@@ -256,6 +272,7 @@ function CreateTaskForm({
   isPending: boolean;
   onSubmit: (formData: FormData) => void;
   personnel: SchedulePerson[];
+  teams: AssignmentTeamView[];
   projects: ScheduleProject[];
 }) {
   const isObserver = currentUserRole === "OBSERVER";
@@ -279,7 +296,7 @@ function CreateTaskForm({
       {isObserver ? (
         <input name="assigneeIds" type="hidden" value={currentUserId} />
       ) : (
-        <AssigneeFields personnel={personnel} selectedIds={new Set()} />
+        <TeamAssigneeFields personnel={personnel} teams={teams} taskDate={date} />
       )}
       {projects.length === 0 ? (
         <p className="rounded-md border border-primary/15 bg-primary/5 px-3 py-2 text-sm text-muted-foreground">
@@ -300,6 +317,7 @@ function EditTaskForm({
   onRemove,
   onSubmit,
   personnel,
+  teams,
   task,
 }: {
   currentUserId: string;
@@ -308,11 +326,11 @@ function EditTaskForm({
   onRemove: (formData: FormData) => void;
   onSubmit: (formData: FormData) => void;
   personnel: SchedulePerson[];
+  teams: AssignmentTeamView[];
   task: ScheduleTask;
 }) {
   const isObserver = currentUserRole === "OBSERVER";
   const canEditAssignees = task.status === "PLANNED";
-  const selectedIds = new Set(task.assignees.map((assignee) => assignee.id));
 
   return (
     <form
@@ -349,10 +367,12 @@ function EditTaskForm({
             name="managerNote"
             rows={4}
           />
-          <AssigneeFields
+          <TeamAssigneeFields
             disabled={!canEditAssignees}
             personnel={personnel}
-            selectedIds={selectedIds}
+            teams={teams}
+            assignments={task.assignees}
+            taskDate={task.taskDate}
           />
         </>
       )}

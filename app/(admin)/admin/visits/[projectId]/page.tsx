@@ -11,6 +11,8 @@ import { requireAnyRole } from "@/lib/auth/session";
 import { formatDisplayDate, formatDisplayDateOnly, formatDisplayTime } from "@/lib/dates/format";
 import { getDateOnlyRangeInAppTimeZone, getTodayDateOnly } from "@/lib/dates/today";
 import { prisma } from "@/lib/db/prisma";
+import { readProjectVisits } from "@/lib/visits/read";
+import { getVisitDayKey } from "@/lib/visits/status";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +25,7 @@ export default async function VisitProjectDetailPage({
 }) {
   const user = await requireAnyRole(["ADMIN", "OBSERVER"]);
   const { projectId } = await params;
+  const todayRange = getDateOnlyRangeInAppTimeZone(getTodayDateOnly());
   const project = await prisma.project.findUnique({
     where: {
       id: projectId,
@@ -89,14 +92,15 @@ export default async function VisitProjectDetailPage({
     location: project.location,
     longitude: project.longitude ? String(project.longitude) : null,
   });
-  const lastVisit = project.visits[0];
-  const todayRange = getDateOnlyRangeInAppTimeZone(getTodayDateOnly());
-  const currentUserVisitToday = project.visits.find(
-    (visit) =>
-      visit.visitedByUserId === user.id &&
-      visit.visitedAt >= todayRange.start &&
-      visit.visitedAt < todayRange.end,
-  );
+  const [latestVisits, currentUserVisitToday] = await Promise.all([
+    readProjectVisits({ projectId: project.id, latestPerProject: true }),
+    prisma.projectVisit.findFirst({
+      where: { projectId: project.id, visitedByUserId: user.id, visitedAt: { gte: todayRange.start, lt: todayRange.end } },
+      orderBy: [{ visitedAt: "desc" }, { id: "desc" }],
+      select: { id: true },
+    }),
+  ]);
+  const lastVisit = latestVisits[0];
   const lastTask = project.dailyTasks[0];
   const groupedTimeline = groupTimelineByDate(
     groupTimelineFileEvents(project.timelineEvents),
@@ -129,7 +133,7 @@ export default async function VisitProjectDetailPage({
                 label="Son ziyaret"
                 value={
                   lastVisit
-                    ? `${formatDisplayDate(lastVisit.visitedAt)} - ${lastVisit.visitedBy.fullName}`
+                    ? `${formatDisplayDate(lastVisit.visitedAt)} - ${lastVisit.userName}`
                     : "Ziyaret yok"
                 }
               />
@@ -180,7 +184,9 @@ export default async function VisitProjectDetailPage({
 
         <VisitInteractionPanel
           initialVisitId={currentUserVisitToday?.id ?? null}
+          currentDay={getVisitDayKey()}
           projectId={project.id}
+          userId={user.id}
         />
 
         <section className="rounded-lg border border-navy/10 bg-white p-5 shadow-card">

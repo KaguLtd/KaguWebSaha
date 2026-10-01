@@ -1,0 +1,28 @@
+[Unit]
+Description=Kagu Saha independent media worker
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor=/var/lib/kagu-saha/uploads
+
+[Service]
+Type=simple
+User=kagu-saha
+Group=kagu-saha
+WorkingDirectory=/srv/kagu-saha/current
+EnvironmentFile=/etc/kagu-saha/runtime.env
+ExecStartPre=/opt/node-v24.15.0/bin/node scripts/deploy-preflight.mjs --mode=upgrade --env-file=/etc/kagu-saha/runtime.env --worker-env-file=/etc/kagu-saha/runtime.env
+ExecStart=/opt/node-v24.15.0/bin/node dist/media-worker/scripts/media-worker.js
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+KillMode=mixed
+TimeoutStopSec=180
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/kagu-saha/uploads /var/lib/kagu-saha/worker-health
+
+[Install]
+WantedBy=multi-user.target

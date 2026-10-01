@@ -1,0 +1,41 @@
+# Adapt the domain, certificate locations and TLS policy before installation.
+# UPLOAD_DIR stays private: do not serve it through an nginx alias.
+server {
+    listen 80;
+    server_name saha.example.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name saha.example.com;
+    ssl_certificate /etc/letsencrypt/live/saha.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/saha.example.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    # Legacy multipart endpoints accept up to 100 MiB. The resumable API itself
+    # enforces at most 2 MiB per chunk; the client currently uses 64–1024 KiB.
+    client_max_body_size 105m;
+    # These are inactivity intervals, not a deadline for a complete video.
+    client_body_timeout 120s;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection "";
+        proxy_set_header Upload-Offset $http_upload_offset;
+        proxy_set_header Range $http_range;
+        proxy_set_header If-Range $http_if_range;
+        proxy_request_buffering off;
+        proxy_buffering off;
+        proxy_connect_timeout 10s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+        # Do not limit methods: POST, PATCH, GET and HEAD are required.
+        # Keep upstream Upload-Offset, Accept-Ranges, Content-Range and 206/416.
+    }
+}

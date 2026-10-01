@@ -7,6 +7,7 @@ import {
   MapPinned,
   PlusCircle,
   UsersRound,
+  ListRestart,
 } from "lucide-react";
 import type { User } from "@prisma/client";
 
@@ -49,6 +50,7 @@ const navItems = [
     label: "Kullanicilar",
     icon: UsersRound,
   },
+  { href: "/admin/media-jobs", label: "Dosya İşleri", icon: ListRestart },
 ];
 
 const observerNavItems = navItems.filter((item) =>

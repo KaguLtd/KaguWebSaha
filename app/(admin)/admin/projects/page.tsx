@@ -4,9 +4,11 @@ import { History, Search } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { QuickProjectNote } from "@/components/admin/quick-project-note";
+import { VisitStatusIcon } from "@/components/admin/visit-status-icon";
 import { requireAnyRole } from "@/lib/auth/session";
 import { formatDisplayDate } from "@/lib/dates/format";
 import { prisma } from "@/lib/db/prisma";
+import { readLatestProjectVisits } from "@/lib/visits/read";
 
 export const dynamic = "force-dynamic";
 
@@ -74,6 +76,7 @@ export default async function ProjectsPage({
       },
     }),
   ]);
+  const latestVisits = await readLatestProjectVisits(projects.filter((project) => project.isActive).map((project) => project.id));
 
   return (
     <main className="p-6 text-navy">
@@ -153,12 +156,15 @@ export default async function ProjectsPage({
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
+                      <div className="flex min-w-0 items-center gap-2">
+                      {project.isActive ? <VisitStatusIcon visitedAt={latestVisits.get(project.id)?.visitedAt} userName={latestVisits.get(project.id)?.userName} /> : null}
                       <Link
-                        className="block truncate text-sm font-semibold text-primary underline-offset-2 hover:underline"
+                        className="truncate text-sm font-semibold text-primary underline-offset-2 hover:underline"
                         href={`/admin/projects/${project.id}`}
                       >
                         {project.name}
                       </Link>
+                      </div>
                       <p className="truncate text-xs text-muted-foreground">
                         {project.customer.name}{project.isActive ? "" : " · Arsiv"}
                       </p>
@@ -170,7 +176,7 @@ export default async function ProjectsPage({
                           <span className="sr-only">Gecmisi Incele</span>
                         </Link>
                       </Button>
-                      <QuickProjectNote iconOnly projectId={project.id} projectName={project.name} />
+                      <QuickProjectNote iconOnly projectId={project.id} projectName={project.name} userId={user.id} />
                     </div>
                   </div>
                 </article>
@@ -192,12 +198,15 @@ export default async function ProjectsPage({
                   {projects.map((project) => (
                     <tr className="transition hover:bg-primary/5" key={project.id}>
                       <td className="px-4 py-4">
+                        <div className="flex items-center gap-2">
+                        {project.isActive ? <VisitStatusIcon visitedAt={latestVisits.get(project.id)?.visitedAt} userName={latestVisits.get(project.id)?.userName} /> : null}
                         <Link
                           className="font-medium text-primary underline-offset-2 hover:underline"
                           href={`/admin/projects/${project.id}`}
                         >
                           {project.name}
                         </Link>
+                        </div>
                         {!project.isActive ? (
                           <p className="mt-1 text-xs text-muted-foreground">Arsiv</p>
                         ) : null}
@@ -215,7 +224,7 @@ export default async function ProjectsPage({
                           <Button asChild size="sm" variant="outline">
                             <Link href={`/admin/projects/${project.id}`}>Gecmisi Incele</Link>
                           </Button>
-                          <QuickProjectNote projectId={project.id} projectName={project.name} />
+                          <QuickProjectNote projectId={project.id} projectName={project.name} userId={user.id} />
                         </div>
                       </td>
                     </tr>

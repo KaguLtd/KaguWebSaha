@@ -19,6 +19,19 @@ enum DailyTaskStatus {
   COMPLETED
 }
 
+enum WorkforceKind {
+  PERSONNEL
+  CONTRACTOR
+  OBSERVER
+}
+
+enum UploadSessionStatus {
+  OPEN
+  PROCESSING
+  COMPLETED
+  CANCELLED
+}
+
 enum TaskEventType {
   TASK_CREATED
   TASK_UPDATED
@@ -93,6 +106,7 @@ model User {
   sessions       Session[]
   offlineItems   OfflinePendingItem[]
   savedReports   SavedReport[]
+  teams          Team[]
 
   @@map("users")
 }
@@ -217,16 +231,40 @@ model DailyTask {
 }
 
 model DailyTaskAssignee {
-  id          String @id @default(cuid())
-  dailyTaskId String @map("daily_task_id")
-  userId      String @map("user_id")
+  id                    String         @id @default(cuid())
+  dailyTaskId           String         @map("daily_task_id")
+  userId                String         @map("user_id")
+  teamId                String?        @map("team_id")
+  teamNameSnapshot      String?        @map("team_name_snapshot")
+  headcountSnapshot     Int?           @map("headcount_snapshot")
+  actualHeadcount       Int?           @map("actual_headcount")
+  workforceKindSnapshot WorkforceKind? @map("workforce_kind_snapshot")
 
   dailyTask DailyTask @relation(fields: [dailyTaskId], references: [id], onDelete: Cascade)
   user      User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  team      Team?     @relation(fields: [teamId], references: [id], onDelete: SetNull)
 
   @@unique([dailyTaskId, userId])
   @@index([userId])
+  @@index([teamId])
   @@map("daily_task_assignees")
+}
+
+model Team {
+  id                    String              @id @default(cuid())
+  name                  String
+  representativeUserId  String              @map("representative_user_id")
+  extraPersonnelCount   Int                 @map("extra_personnel_count")
+  includeRepresentative Boolean             @default(true) @map("include_representative")
+  isActive              Boolean             @default(true) @map("is_active")
+  effectiveFrom         DateTime            @map("effective_from") @db.Date
+  createdAt             DateTime            @default(now()) @map("created_at")
+  updatedAt             DateTime            @updatedAt @map("updated_at")
+  representative        User                @relation(fields: [representativeUserId], references: [id], onDelete: Restrict)
+  assignments           DailyTaskAssignee[]
+
+  @@index([representativeUserId])
+  @@map("teams")
 }
 
 model TaskEvent {
@@ -298,6 +336,7 @@ model ProjectVisit {
 
 model ProjectFile {
   id                   String    @id @default(cuid())
+  uploadSessionId      String?   @unique @map("upload_session_id")
   projectId            String    @map("project_id")
   dailyTaskId          String?   @map("daily_task_id")
   projectVisitId       String?   @map("project_visit_id")
@@ -338,11 +377,16 @@ model ImageThumbnailJob {
   createdAt            DateTime             @default(now()) @map("created_at")
   updatedAt            DateTime             @updatedAt @map("updated_at")
   completedAt          DateTime?            @map("completed_at")
+  lockedBy             String?              @map("locked_by")
+  lockedUntil          DateTime?            @map("locked_until")
+  nextAttemptAt        DateTime             @default(now()) @map("next_attempt_at")
+  lastAttemptAt        DateTime?            @map("last_attempt_at")
 
   projectFile ProjectFile @relation(fields: [projectFileId], references: [id], onDelete: Cascade)
 
   @@index([status, createdAt])
   @@index([projectFileId])
+  @@index([status, nextAttemptAt])
   @@map("image_thumbnail_jobs")
 }
 
@@ -364,13 +408,51 @@ model HeicConversionJob {
   createdAt         DateTime             @default(now()) @map("created_at")
   updatedAt         DateTime             @updatedAt @map("updated_at")
   completedAt       DateTime?            @map("completed_at")
+  uploadSessionId   String?              @unique @map("upload_session_id")
+  stagingCleanedAt  DateTime?            @map("staging_cleaned_at")
+  lockedBy          String?              @map("locked_by")
+  lockedUntil       DateTime?            @map("locked_until")
+  nextAttemptAt     DateTime             @default(now()) @map("next_attempt_at")
+  lastAttemptAt     DateTime?            @map("last_attempt_at")
 
   @@index([status, createdAt])
+  @@index([status, nextAttemptAt])
+  @@index([status, stagingCleanedAt, nextAttemptAt], map: "heic_cleanup_queue_idx")
   @@index([projectId])
   @@index([dailyTaskId])
   @@index([projectVisitId])
   @@index([uploadedByUserId])
   @@map("heic_conversion_jobs")
+}
+
+model UploadSession {
+  id               String              @id @default(cuid())
+  uploadedByUserId String              @map("uploaded_by_user_id")
+  projectId        String              @map("project_id")
+  dailyTaskId      String?             @map("daily_task_id")
+  projectVisitId   String?             @map("project_visit_id")
+  clientUploadId   String              @map("client_upload_id")
+  originalName     String              @map("original_name")
+  mimeType         String              @map("mime_type")
+  sizeBytes        BigInt              @map("size_bytes")
+  offsetBytes      BigInt              @default(0) @map("offset_bytes")
+  tempStoragePath  String              @map("temp_storage_path")
+  stagingCleanedAt DateTime?           @map("staging_cleaned_at")
+  status           UploadSessionStatus @default(OPEN)
+  projectFileId    String?             @map("project_file_id")
+  note             String?
+  lockedBy         String?             @map("locked_by")
+  lockedUntil      DateTime?           @map("locked_until")
+  createdAt        DateTime            @default(now()) @map("created_at")
+  updatedAt        DateTime            @updatedAt @map("updated_at")
+  expiresAt        DateTime            @map("expires_at")
+  completedAt      DateTime?           @map("completed_at")
+
+  @@unique([uploadedByUserId, clientUploadId])
+  @@index([status, expiresAt])
+  @@index([stagingCleanedAt, status, updatedAt], map: "upload_staging_cleanup_idx")
+  @@index([projectId])
+  @@map("upload_sessions")
 }
 
 model OfflinePendingItem {

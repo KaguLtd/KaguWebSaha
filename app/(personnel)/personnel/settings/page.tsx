@@ -3,8 +3,12 @@ import { changePasswordAction } from "./actions";
 
 import { LocationTestButton } from "@/components/personnel/location-fields";
 import { Button } from "@/components/ui/button";
+import { OfflineQueueManager } from "@/components/personnel/offline-queue-manager";
+import { RecentUploadResults } from "@/components/personnel/recent-upload-results";
+import { requireRole } from "@/lib/auth/session";
 
-export default function PersonnelSettingsPage() {
+export default async function PersonnelSettingsPage() {
+  const user = await requireRole("PERSONNEL");
   return (
     <main className="p-6">
       <div className="mx-auto flex max-w-md flex-col gap-6">
@@ -35,13 +39,8 @@ export default function PersonnelSettingsPage() {
           </div>
         </section>
 
-        <section className="rounded-lg border bg-white p-5 shadow-sm">
-          <h2 className="text-lg font-semibold">Offline kayitlar</h2>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            Internet yokken olusan saha kayitlari tarayicida bekler ve baglanti
-            gelince otomatik olarak server'a gonderilir.
-          </p>
-        </section>
+        <OfflineQueueManager kind="PERSONNEL" userId={user.id} />
+        <RecentUploadResults userId={user.id} />
 
         <form action={logoutAction}>
           <Button className="w-full" type="submit" variant="outline">

@@ -12,6 +12,7 @@ import {
 import { getTodayDateOnly } from "@/lib/dates/today";
 import { requireAnyRole } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/prisma";
+import { teamHeadcount } from "@/lib/teams/headcount";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +35,7 @@ export default async function SchedulePage({
   const previousMonth = toDateInputValue(addMonths(monthDate, -1)).slice(0, 7);
   const nextMonth = toDateInputValue(addMonths(monthDate, 1)).slice(0, 7);
 
-  const [tasks, projects, personnel] = await Promise.all([
+  const [tasks, projects, personnel, teams] = await Promise.all([
     prisma.dailyTask.findMany({
       where: {
         taskDate: {
@@ -78,6 +79,7 @@ export default async function SchedulePage({
             fullName: "asc",
           },
         }),
+    user.role === "OBSERVER" ? Promise.resolve([]) : prisma.team.findMany({ include: { representative: true }, orderBy: { name: "asc" } }),
   ]);
 
   return (
@@ -128,6 +130,7 @@ export default async function SchedulePage({
             fullName: person.fullName,
             id: person.id,
           }))}
+          teams={teams.map((team) => ({ id: team.id, name: team.name, representativeUserId: team.representativeUserId, representativeName: team.representative.fullName, headcount: teamHeadcount(team.extraPersonnelCount, team.includeRepresentative), isActive: team.isActive && team.representative.isActive && team.representative.role === "PERSONNEL", effectiveFrom: toDateInputValue(team.effectiveFrom) }))}
           projects={projects.map((project) => ({
             customerName: project.customer.name,
             id: project.id,
@@ -140,6 +143,9 @@ export default async function SchedulePage({
                 : task.assignees.map((assignee) => ({
                     fullName: assignee.user.fullName,
                     id: assignee.userId,
+                    teamId: assignee.teamId,
+                    teamNameSnapshot: assignee.teamNameSnapshot,
+                    headcountSnapshot: assignee.headcountSnapshot,
                   })),
             id: task.id,
             managerNote: user.role === "OBSERVER" ? "" : task.managerNote ?? "",

@@ -1,255 +1,63 @@
 import type { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
-import { readFile } from "fs/promises";
-
 import { prisma } from "@/lib/db/prisma";
-import { queueProjectFileThumbnail } from "@/lib/files/image-thumbnail-jobs";
-import {
-  convertHeicToJpeg,
-  removeStorageFile,
-  resolveStoragePath,
-  type ProjectUploadResult,
-  writeStorageBuffer,
-} from "@/lib/files/storage";
+import { queueProjectFileThumbnail } from "./image-thumbnail-jobs";
+import { processHeicJobs } from "./media-processing";
+import type { ProjectUploadResult } from "./storage";
 
-type PrismaClientLike = typeof prisma | Prisma.TransactionClient;
-
-type ProjectUploadContext = {
+type Client = typeof prisma | Prisma.TransactionClient;
+type UploadContext = {
   dailyTaskId?: string | null;
+  projectVisitId?: string | null;
+  uploadSessionId?: string | null;
   note?: string | null;
   projectId: string;
-  projectVisitId?: string | null;
   timelineTitle: string;
   uploadedByUserId: string;
 };
+let processing = false;
 
-let processorRunning = false;
-let recoveredInterruptedJobs = false;
-
-export async function recordProjectUpload(
-  upload: ProjectUploadResult,
-  context: ProjectUploadContext,
-  client: PrismaClientLike = prisma,
-) {
+export async function recordProjectUpload(upload: ProjectUploadResult, context: UploadContext, client: Client = prisma) {
   if (upload.status === "ready") {
-    const projectFile = await client.projectFile.create({
-      data: {
-        projectId: context.projectId,
-        dailyTaskId: context.dailyTaskId,
-        projectVisitId: context.projectVisitId,
-        uploadedByUserId: context.uploadedByUserId,
-        originalName: upload.originalName,
-        mimeType: upload.mimeType,
-        sizeBytes: upload.sizeBytes,
-        storagePath: upload.storagePath,
-        note: context.note,
-      },
-    });
-
-    await client.projectTimelineEvent.create({
-      data: {
-        projectId: context.projectId,
-        dailyTaskId: context.dailyTaskId,
-        projectVisitId: context.projectVisitId,
-        userId: context.uploadedByUserId,
-        eventType: "FILE_ADDED",
-        title: context.timelineTitle,
-        description: upload.originalName,
-        fileId: projectFile.id,
-      },
-    });
-
-    await queueProjectFileThumbnail(projectFile, client);
-
-    return;
+    const file = await client.projectFile.create({ data: {
+      projectId: context.projectId, dailyTaskId: context.dailyTaskId, projectVisitId: context.projectVisitId,
+      uploadSessionId: context.uploadSessionId, uploadedByUserId: context.uploadedByUserId,
+      originalName: upload.originalName, mimeType: upload.mimeType, sizeBytes: upload.sizeBytes,
+      storagePath: upload.storagePath, note: context.note,
+    } });
+    await client.projectTimelineEvent.create({ data: {
+      projectId: context.projectId, dailyTaskId: context.dailyTaskId, projectVisitId: context.projectVisitId,
+      userId: context.uploadedByUserId, eventType: "FILE_ADDED", title: context.timelineTitle,
+      description: upload.originalName, fileId: file.id,
+    } });
+    await queueProjectFileThumbnail(file, client);
+    return { projectFileId: file.id, heicConversionJobId: null };
   }
-
-  await client.heicConversionJob.create({
-    data: {
-      projectId: context.projectId,
-      dailyTaskId: context.dailyTaskId,
-      projectVisitId: context.projectVisitId,
-      uploadedByUserId: context.uploadedByUserId,
-      originalName: upload.originalName,
-      targetName: upload.targetName,
-      tempStoragePath: upload.tempStoragePath,
-      targetStoragePath: upload.targetStoragePath,
-      note: context.note,
-      timelineTitle: context.timelineTitle,
-    },
-  });
-
+  const job = await client.heicConversionJob.create({ data: {
+    projectId: context.projectId, dailyTaskId: context.dailyTaskId, projectVisitId: context.projectVisitId,
+    uploadSessionId: context.uploadSessionId, uploadedByUserId: context.uploadedByUserId,
+    originalName: upload.originalName, targetName: upload.targetName,
+    tempStoragePath: upload.tempStoragePath, targetStoragePath: upload.targetStoragePath,
+    note: context.note, timelineTitle: context.timelineTitle,
+  } });
   scheduleHeicConversionProcessing();
+  return { projectFileId: null, heicConversionJobId: job.id };
 }
 
 export function scheduleHeicConversionProcessing() {
+  if (process.env.MEDIA_WORKER_MODE === "external") return;
   const run = () => {
-    void processPendingHeicConversions();
+    if (processing) return;
+    processing = true;
+    void processHeicJobs(3, ({ projectId, dailyTaskId }) => {
+      for (const route of ["/admin", "/admin/schedule", "/admin/visits", "/admin/reports", "/personnel", `/admin/visits/${projectId}`, `/admin/projects/${projectId}`]) revalidatePath(route);
+      if (dailyTaskId) {
+        revalidatePath(`/admin/schedule/tasks/${dailyTaskId}`);
+        revalidatePath(`/personnel/tasks/${dailyTaskId}`);
+      }
+    }).catch(() => console.warn("[media-worker] HEIC batch could not run."))
+      .finally(() => { processing = false; });
   };
-
-  try {
-    after(run);
-  } catch {
-    setImmediate(run);
-  }
-}
-
-async function processPendingHeicConversions() {
-  if (processorRunning) {
-    return;
-  }
-
-  processorRunning = true;
-
-  try {
-    if (!recoveredInterruptedJobs) {
-      await prisma.heicConversionJob.updateMany({
-        where: {
-          status: "PROCESSING",
-        },
-        data: {
-          status: "PENDING",
-          lastError: "Önceki işlem yarıda kaldı; otomatik olarak yeniden başlatıldı.",
-        },
-      });
-      recoveredInterruptedJobs = true;
-    }
-
-    while (true) {
-      const jobs = await prisma.heicConversionJob.findMany({
-        where: {
-          status: "PENDING",
-        },
-        orderBy: {
-          createdAt: "asc",
-        },
-        take: 3,
-      });
-
-      if (jobs.length === 0) {
-        return;
-      }
-
-      for (const job of jobs) {
-        const claimed = await prisma.heicConversionJob.updateMany({
-          where: {
-            id: job.id,
-            status: "PENDING",
-          },
-          data: {
-            attempts: {
-              increment: 1,
-            },
-            lastError: null,
-            status: "PROCESSING",
-          },
-        });
-
-        if (claimed.count === 0) {
-          continue;
-        }
-
-        await processHeicConversionJob(job.id);
-      }
-    }
-  } finally {
-    processorRunning = false;
-  }
-}
-
-async function processHeicConversionJob(jobId: string) {
-  const job = await prisma.heicConversionJob.findUnique({
-    where: {
-      id: jobId,
-    },
-  });
-
-  if (!job || job.status !== "PROCESSING") {
-    return;
-  }
-
-  let wroteJpeg = false;
-
-  try {
-    const heicBuffer = await readFile(resolveStoragePath(job.tempStoragePath));
-    const jpegBuffer = await convertHeicToJpeg(heicBuffer);
-
-    await writeStorageBuffer(job.targetStoragePath, jpegBuffer);
-    wroteJpeg = true;
-
-    await prisma.$transaction(async (tx) => {
-      const projectFile = await tx.projectFile.create({
-        data: {
-          projectId: job.projectId,
-          dailyTaskId: job.dailyTaskId,
-          projectVisitId: job.projectVisitId,
-          uploadedByUserId: job.uploadedByUserId,
-          originalName: job.targetName,
-          mimeType: "image/jpeg",
-          sizeBytes: BigInt(jpegBuffer.byteLength),
-          storagePath: job.targetStoragePath,
-          note: job.note,
-        },
-      });
-
-      await tx.projectTimelineEvent.create({
-        data: {
-          projectId: job.projectId,
-          dailyTaskId: job.dailyTaskId,
-          projectVisitId: job.projectVisitId,
-          userId: job.uploadedByUserId,
-          eventType: "FILE_ADDED",
-          title: job.timelineTitle,
-          description: job.targetName,
-          fileId: projectFile.id,
-        },
-      });
-
-      await queueProjectFileThumbnail(projectFile, tx);
-
-      await tx.heicConversionJob.update({
-        where: {
-          id: job.id,
-        },
-        data: {
-          completedAt: new Date(),
-          lastError: null,
-          status: "COMPLETED",
-        },
-      });
-    });
-
-    await removeStorageFile(job.tempStoragePath);
-    revalidateConvertedPaths(job.projectId, job.dailyTaskId);
-  } catch (error) {
-    if (wroteJpeg) {
-      await removeStorageFile(job.targetStoragePath).catch(() => undefined);
-    }
-
-    await prisma.heicConversionJob.update({
-      where: {
-        id: job.id,
-      },
-      data: {
-        lastError: error instanceof Error ? error.message : "HEIC dosyasi JPEG'e donusturulemedi.",
-        status: "FAILED",
-      },
-    });
-  }
-}
-
-function revalidateConvertedPaths(projectId: string, dailyTaskId: string | null) {
-  revalidatePath("/admin");
-  revalidatePath("/admin/schedule");
-  revalidatePath("/admin/visits");
-  revalidatePath(`/admin/visits/${projectId}`);
-  revalidatePath("/admin/reports");
-  revalidatePath("/personnel");
-  revalidatePath(`/admin/projects/${projectId}`);
-
-  if (dailyTaskId) {
-    revalidatePath(`/admin/schedule/tasks/${dailyTaskId}`);
-    revalidatePath(`/personnel/tasks/${dailyTaskId}`);
-  }
+  try { after(run); } catch { setImmediate(run); }
 }
