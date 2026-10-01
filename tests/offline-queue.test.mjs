@@ -187,6 +187,79 @@ test('file dependency waits for its note; another task note is not blocked by th
   assert.equal(records.find((item) => item.id === first.media[0].id).files[0].size, 32);
 });
 
+test('a failed arrival retains its transition but still delivers the same task note and two photos', async () => {
+  const queue = await newTab();
+  const arrival = await queue.enqueuePersonnelEvent({ userId: owner, taskId: 'task', projectId: 'site', eventType: 'ARRIVED_SITE' });
+  const photos = [1, 2].map((index) => new File([new Uint8Array(32)], `field-${index}.jpg`, { type: 'image/jpeg' }));
+  const note = await queue.enqueuePersonnelEvent({ userId: owner, taskId: 'task', projectId: 'site', eventType: 'NOTE', note: 'Ha', files: photos });
+  for (const item of note.media) await queue.replaceOfflineItemFiles(item.id, item.files, { userId: owner });
+  const departure = await queue.enqueuePersonnelEvent({ userId: owner, taskId: 'task', projectId: 'site', eventType: 'LEFT_SITE' });
+  let arrivalBroken = true;
+  const events = [];
+  const published = [];
+  globalThis.fetch = async (url, options) => {
+    if (url === '/api/offline/sync') {
+      const input = JSON.parse(options.body);
+      events.push(input.type);
+      return input.type === 'ARRIVED_SITE' && arrivalBroken ? Response.json({ error: 'Sunucu kaydı tamamlayamadı.' }, { status: 503 }) : ok();
+    }
+    if (url === '/api/uploads') {
+      const input = JSON.parse(options.body);
+      return ok({ uploadId: input.clientUploadId, offsetBytes: 0, sizeBytes: 32, status: 'OPEN' });
+    }
+    const uploadId = url.split('/')[3];
+    if (options?.method === 'PATCH') return ok({ uploadId, offsetBytes: 32, sizeBytes: 32, status: 'OPEN' });
+    if (url.endsWith('/finalize')) { published.push(uploadId); return finalized(uploadId); }
+    throw new Error(`Unexpected URL ${url}`);
+  };
+  const result = await queue.syncOfflineItems({ userId: owner, kinds: ['PERSONNEL'] });
+  assert.equal(result.synced, 3);
+  assert.deepEqual(result.failedIds, [arrival.event.id]);
+  assert.deepEqual(events, ['ARRIVED_SITE', 'NOTE']);
+  assert.equal(published.length, 2);
+  assert.deepEqual((await queue.listOfflineItems(['PERSONNEL'], owner)).map((item) => item.id), [arrival.event.id, departure.event.id]);
+  assert.equal((await queue.listSuccessfulUploads(owner)).length, 2);
+  arrivalBroken = false;
+  const recovered = await queue.syncOfflineItems({ userId: owner, kinds: ['PERSONNEL'], force: true });
+  assert.equal(recovered.synced, 2);
+  assert.equal(recovered.remaining, 0);
+  assert.deepEqual(events, ['ARRIVED_SITE', 'NOTE', 'ARRIVED_SITE', 'LEFT_SITE']);
+  assert.equal(published.length, 2, 'Recovered transitions must not upload accepted photos again');
+});
+
+test('arrival backoff lets a new note through and keeps departure waiting for arrival', async () => {
+  const queue = await newTab();
+  const arrival = await queue.enqueuePersonnelEvent({ userId: owner, taskId: 'task', projectId: 'site', eventType: 'ARRIVED_SITE' });
+  globalThis.fetch = async () => Response.json({ error: 'Arrival temporarily unavailable' }, { status: 503 });
+  await queue.syncOfflineItems({ userId: owner, kinds: ['PERSONNEL'] });
+  await queue.enqueuePersonnelEvent({ userId: owner, taskId: 'task', projectId: 'site', eventType: 'NOTE', note: 'Work note' });
+  const departure = await queue.enqueuePersonnelEvent({ userId: owner, taskId: 'task', projectId: 'site', eventType: 'LEFT_SITE' });
+  const sent = [];
+  globalThis.fetch = async (url, options) => { sent.push(JSON.parse(options.body).type); return ok(); };
+  const result = await queue.syncOfflineItems({ userId: owner, kinds: ['PERSONNEL'], eventsOnly: true });
+  assert.equal(result.synced, 1);
+  assert.deepEqual(sent, ['NOTE']);
+  assert.deepEqual((await queue.listOfflineItems(['PERSONNEL'], owner)).map((item) => item.id), [arrival.event.id, departure.event.id]);
+});
+
+test('a server error on one note does not freeze later notes, and its own photo stays retained', async () => {
+  const queue = await newTab();
+  const first = await queue.enqueuePersonnelEvent({ userId: owner, taskId: 'task', projectId: 'site', eventType: 'NOTE', note: 'Unaccepted note', files: [video()] });
+  await queue.enqueuePersonnelEvent({ userId: owner, taskId: 'task', projectId: 'site', eventType: 'NOTE', note: 'Independent note' });
+  const sent = [];
+  globalThis.fetch = async (url, options) => {
+    assert.equal(url, '/api/offline/sync', 'An unaccepted note must retain its photo dependency');
+    const input = JSON.parse(options.body); sent.push(input.note);
+    return input.clientItemId === first.event.id ? Response.json({ error: 'Temporary write failure' }, { status: 503 }) : ok();
+  };
+  const result = await queue.syncOfflineItems({ userId: owner, kinds: ['PERSONNEL'] });
+  assert.equal(result.synced, 1);
+  assert.deepEqual(sent, ['Unaccepted note', 'Independent note']);
+  const remaining = await queue.listOfflineItems(['PERSONNEL'], owner);
+  assert.deepEqual(remaining.map((item) => item.id), [first.event.id, first.media[0].id]);
+  assert.equal(remaining[1].files[0].size, 32);
+});
+
 test('a newly saved note can sync while a previous video transfer is still waiting', { timeout: 5000 }, async () => {
   const queue = await newTab();
   const item = await queue.enqueueVisitUpload({ userId: owner, projectId: 'site', files: [video()] });

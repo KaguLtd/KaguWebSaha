@@ -47,9 +47,15 @@ export async function POST(request: Request) {
     const result = await runOfflineOperation({ userId: user.id, clientItemId: text(payload, "clientItemId") || undefined, type, payload: operationPayload }, async (tx) => {
       // Shared task status affects every assignee. A short global transition
       // lock also prevents overlapping shared tasks from starting concurrently.
-      if (type !== "NOTE") await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('kagu-saha-site-events'))`;
-      await tx.$queryRaw`SELECT id FROM users WHERE id = ${user.id} FOR UPDATE`;
-      await tx.$queryRaw`SELECT id FROM daily_tasks WHERE id = ${taskId} FOR UPDATE`;
+      // Prisma cannot deserialize PostgreSQL void. Cast only the result; the
+      // transaction lock still serializes overlapping arrival/departure writes.
+      if (type !== "NOTE") await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('kagu-saha-site-events'))::text`;
+      // Receipt inserts hold a foreign-key KEY SHARE lock on users. FOR UPDATE
+      // would deadlock with another receipt waiting for the advisory lock.
+      // We change only non-key fields, so NO KEY UPDATE safely serializes writes
+      // while remaining compatible with receipt/media foreign-key checks.
+      await tx.$queryRaw`SELECT id FROM users WHERE id = ${user.id} FOR NO KEY UPDATE`;
+      await tx.$queryRaw`SELECT id FROM daily_tasks WHERE id = ${taskId} FOR NO KEY UPDATE`;
       const today = getTodayDateOnly();
       const task = await tx.dailyTask.findFirst({ where: { id: taskId, taskDate: { lte: today }, assignees: { some: { userId: user.id } } },
         include: { assignees: true } });
@@ -104,6 +110,13 @@ export async function POST(request: Request) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Kayıt kaydedilemedi.";
     const invalid = error instanceof InputError || error instanceof SyntaxError;
+    if (!invalid) {
+      // Error messages/metadata can contain query values; log only error codes.
+      const code = error && typeof error === "object" && "code" in error && /^P\d{4}$/.test(String(error.code)) ? String(error.code) : "UNKNOWN";
+      const meta = error && typeof error === "object" && "meta" in error ? error.meta : undefined;
+      const sqlState = meta && typeof meta === "object" && "code" in meta && /^[0-9A-Z]{5}$/.test(String(meta.code)) ? String(meta.code) : undefined;
+      console.error("[personnel-sync] Persistence failed; device record retained.", { code, ...(sqlState ? { sqlState } : {}) });
+    }
     return NextResponse.json({ error: invalid ? message : "Sunucu kaydı şu anda tamamlayamadı. Cihazdaki kayıt korunuyor." }, { status: invalid ? 400 : 503 });
   }
 }

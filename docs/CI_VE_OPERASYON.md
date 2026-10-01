@@ -19,6 +19,10 @@ Bu script normal yerel `npm test` içine DB bağlantısı eklemez. Yerel testler
 
 Action etiketleri resmî kaynaklardan doğrulanmıştır: [checkout v6](https://github.com/actions/checkout/blob/v6/action.yml), [setup-node v6](https://github.com/actions/setup-node/blob/v6/action.yml). PostgreSQL service modeli [GitHub rehberine](https://docs.github.com/en/actions/tutorials/use-containerized-services/create-postgresql-service-containers) dayanır.
 
+Migration işi ayrıca `scripts/test-personnel-sync-ci.mjs` ile gerçek Prisma/PostgreSQL üzerinde personel varışı, bir not, iki JPEG yüklemesi ve ayrılışı gerçek API handler'larından geçirir. Kayıp yanıt sonrası tekrar gönderimde tek kayıt/dosya oluşmasını ve eşzamanlı saha geçişlerinin kilitle sıralanmasını doğrular. Önce castsiz PostgreSQL advisory lock sonucunun Prisma'da `void` okuma hatası ürettiğini yeniden oluşturur; düzeltilmiş handler aynı DB üzerinde çalışır. Yalnız oturum/Next.js runtime sınırı testte temsil edilir; DB işlemleri ve dosya yazımı gerçektir. Aynı CI hedef koruması kullanılır, storage yalnız işletim sisteminin geçici test dizinidir. Canlı `.env`, DB ve upload dizini kullanılmaz.
+
+Bu personel testi ayrıca eski `FOR UPDATE` kullanıcı kilidinin eşzamanlı makbuzların foreign-key `KEY SHARE` kilitleriyle `40P01` deadlock ürettiğini yeniden oluşturur. Non-key kullanıcı/görev güncellemeleri `FOR NO KEY UPDATE` ile korunur; iki rakip varıştan biri kabul edilir, diğeri iş kuralına göre reddedilir. Sunucu tanı logları yalnız Prisma hata kodu ve SQLSTATE içerir; not, sorgu değerleri veya DB bağlantı bilgisi içermez.
+
 ### Merge kontrolü
 
 Workflow dosyası branch protection oluşturmaz. `deploy/github/main-required-checks.json`, iki işi `main` için zorunlu tutan örnektir; reviewer şartı veya kullanıcı kısıtlaması eklemez. `strict:true`, dalın güncel `main` ile test edilmesini ister. Repository admin'i GitHub'ın standart istisnasıyla bu kuralı geçersiz kılabilir; olağan merge iki başarılı kontrolü gerektirir. Mevcut protection varsa bu örnekle üzerine yazmak yerine mevcut ayar korunup yalnız required checks güncellenmelidir.
