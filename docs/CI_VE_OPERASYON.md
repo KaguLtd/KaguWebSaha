@@ -6,7 +6,7 @@ Bu rehber yapılandırma örnekleri ve yayın kontrol sırasıdır. Dosyaları e
 
 `.github/workflows/ci.yml`, PR, `main` ve `codex/**` push ile manuel çalışır. Yetkisi `contents: read`; deployment yetkisi ve üretim secrets bağlantısı yoktur. Node sürümü `.node-version` içinde **24.15.0** olarak sabittir.
 
-`verify` işi Linux'ta `npm ci → prisma generate → prisma validate → test → typecheck → lint → build` çalıştırır. URL yalnız loopback port 1'e ait sahte build tanımıdır; DB servisi yoktur. Testler sahte DB ve geçici dizin kullanır. `build`, `.next` ile `dist/media-worker` üretir. Migration, bootstrap, worker ve gerçek dosya bakım işleri bu işte çalıştırılmaz.
+`verify` işi Linux'ta `npm ci → prisma generate → prisma validate → test → typecheck → lint → build` çalıştırır. URL yalnız loopback port 1'e ait sahte build tanımıdır; DB servisi yoktur. Testler kendi geçici dizinlerini kullanır. Build'in `UPLOAD_DIR` değeri `runner.temp` üzerinden yalnız **step env** seviyesinde tanımlıdır; [GitHub context tablosuna](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#context-availability) göre `runner` job env seviyesinde kullanılamaz. `build`, `.next` ile `dist/media-worker` üretir. Migration, bootstrap, worker ve gerçek dosya bakım işleri bu işte çalıştırılmaz.
 
 `migration` işi ayrı, her çalışmada boş bir **PostgreSQL 16** service container kullanır. `scripts/test-migrations-ci.mjs`:
 

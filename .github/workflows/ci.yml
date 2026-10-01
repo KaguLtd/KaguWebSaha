@@ -21,7 +21,6 @@ jobs:
     env:
       DATABASE_URL: postgresql://ci_unused:ci_unused@127.0.0.1:1/kagu_saha_ci_build?schema=public&connect_timeout=1
       APP_ORIGIN: http://localhost:3000
-      UPLOAD_DIR: ${{ runner.temp }}/kagu-ci-uploads
       MEDIA_WORKER_MODE: external
       NEXT_TELEMETRY_DISABLED: '1'
     steps:
@@ -39,6 +38,8 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run build
+        env:
+          UPLOAD_DIR: ${{ runner.temp }}/kagu-ci-uploads
 
   migration:
     name: Isolated PostgreSQL legacy upgrade
