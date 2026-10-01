@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "noEmit": false,
+    "incremental": false,
+    "rootDir": ".",
+    "outDir": "dist/media-worker",
+    "types": ["node"]
+  },
+  "include": ["scripts/media-worker.ts"],
+  "exclude": ["node_modules", "dist", ".next"]
+}

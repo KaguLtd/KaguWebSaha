@@ -2,6 +2,8 @@
 
 Use this checklist after a database is connected and migrations are applied.
 
+For V1.1 on a copy of an existing installation, use the extended checklist in [V1.1 release notes](V1_1_UYGULAMA_VE_YAYIN.md). Bootstrap and sample-data creation below are for a new isolated environment, not an active production update.
+
 ## Preparation
 
 1. Set environment variables from `.env.example`.

@@ -4,9 +4,9 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 
 import {
-  isCompressibleImage,
-  prepareFilesForUpload,
-} from "@/lib/client/image-compression";
+  enqueuePersonnelEvent, hasPendingPersonnelNote, listOfflineItems, syncOfflineItems,
+} from "@/lib/offline/queue";
+import { PersonnelMediaPicker } from "@/components/personnel/media-picker";
 
 type PersonnelEventType = "ARRIVED_SITE" | "LEFT_SITE" | "NOTE";
 
@@ -33,6 +33,7 @@ async function submitPersonnelEvent(
   formData: FormData,
   setMessage: (message: string) => void,
   setProgress: (progress: number | null) => void,
+  context: { userId: string; projectId: string; files?: File[] },
 ) {
   if (type !== "NOTE") {
     await refreshFormLocation(form, formData);
@@ -44,137 +45,36 @@ async function submitPersonnelEvent(
     return "failed";
   }
 
-  let files = formData
+  const files = context.files ?? formData
     .getAll("files")
     .filter((value): value is File => value instanceof File && value.size > 0);
-  const hasFiles = files.length > 0;
-
-  if (!navigator.onLine) {
-    setProgress(null);
-    setMessage("İnternet bağlantısı yok. Bağlantı geldikten sonra tekrar deneyin.");
-    return "failed";
-  }
-
-  if (type === "NOTE" && hasFiles) {
-    const hasVideo = files.some((file) => file.type.toLowerCase().startsWith("video/"));
-    const hasCompressibleImage = files.some(isCompressibleImage);
-    const isPreparingUpload = hasCompressibleImage || hasVideo;
-
-    if (hasCompressibleImage) {
-      setMessage("Fotoğraflar yükleme için hazırlanıyor...");
-    } else if (hasVideo) {
-      setMessage(
-        "Video yüklemesi uzun sürebilir. Yükleme bitene kadar bu ekranı kapatmayın.",
-      );
-    }
-
-    if (isPreparingUpload) {
-      setProgress(8);
-    }
-
-    try {
-      files = await prepareFilesForUpload(files);
-    } catch {
-      setProgress(null);
-      setMessage("Dosyalar yüklemeye hazırlanamadı. Tekrar seçip deneyin.");
-      return "failed";
-    }
-    formData.delete("files");
-
-    for (const file of files) {
-      formData.append("files", file, file.name);
-    }
-
-    if (hasCompressibleImage && hasVideo) {
-      setMessage(
-        "Video yüklemesi uzun sürebilir. Yükleme bitene kadar bu ekranı kapatmayın.",
-      );
-      setProgress(10);
-    }
-  }
-
-  formData.set("type", type);
-
-  if (type === "NOTE" && hasFiles) {
-    setMessage("Yükleniyor...");
-    setProgress(12);
-  }
-
-  let response: DirectResponse;
-
+  let stored = false;
   try {
-    response = await postPersonnelEvent(formData, setProgress);
-  } catch {
+    const queued = await enqueuePersonnelEvent({
+      userId: context.userId, projectId: context.projectId, taskId: String(formData.get("taskId") ?? ""),
+      eventType: type, note: String(formData.get("note") ?? "").trim() || undefined, files,
+      latitude: String(formData.get("latitude") ?? "") || undefined, longitude: String(formData.get("longitude") ?? "") || undefined,
+      actualHeadcount: formData.get("actualHeadcount") ? Number(formData.get("actualHeadcount")) : undefined,
+    });
+    stored = true;
+    setMessage("Kayıt cihazda saklandı.");
+    const result = await syncOfflineItems({ userId: context.userId, kinds: ["PERSONNEL"], eventsOnly: true });
+    const remaining = await listOfflineItems(["PERSONNEL"], context.userId);
+    const eventPending = remaining.find((item) => item.id === queued.event.id);
+    if (!eventPending) {
+      setProgress(100);
+      setMessage(files.length ? `Not kaydedildi. ${files.length} dosya ayrı olarak yükleniyor; bekleyenleri Ayarlar'da görebilirsiniz.` : "İşlem kaydedildi.");
+      void syncOfflineItems({ userId: context.userId, kinds: ["PERSONNEL"] });
+      return "synced";
+    }
     setProgress(null);
-    setMessage("Sunucuya ulaşılamadı. Bağlantıyı kontrol edip tekrar deneyin.");
-    return "failed";
-  }
-
-  if (!response.ok) {
+    setMessage(result.error || "İnternet bekleniyor. Kayıt cihazda saklandı ve bağlantıda gönderilecek.");
+    return eventPending.status === "FAILED" ? "retained" : "queued";
+  } catch (error) {
     setProgress(null);
-    setMessage(response.error || "İşlem kaydedilemedi. Tekrar deneyin.");
-    return "failed";
+    setMessage(stored ? "Kayıt cihazda korundu. Gönderim durumunu Ayarlar'daki bekleyen kayıtlardan kontrol edin." : error instanceof Error ? error.message : "Cihaza kayıt yapılamadı. Not ve dosyalar ekranda korundu; depolama alanını kontrol edin.");
+    return stored ? "queued" : "failed";
   }
-
-  setProgress(100);
-  setMessage("İşlem kaydedildi.");
-  return "synced";
-}
-
-type DirectResponse = {
-  error?: string;
-  ok: boolean;
-  status: number;
-};
-
-function postPersonnelEvent(
-  formData: FormData,
-  setProgress: (progress: number | null) => void,
-) {
-  return new Promise<DirectResponse>((resolve, reject) => {
-    const request = new XMLHttpRequest();
-    request.open("POST", "/api/offline/sync");
-
-    request.upload.onprogress = (event) => {
-      if (event.lengthComputable) {
-        const uploadProgress = Math.round((event.loaded / event.total) * 80);
-        setProgress(Math.min(92, Math.max(12, 12 + uploadProgress)));
-      }
-    };
-    request.onerror = () => reject(new Error("Upload failed"));
-    request.onload = () => {
-      let payload: { error?: string; ok?: boolean } = {};
-
-      try {
-        payload = JSON.parse(request.responseText || "{}");
-      } catch {
-        // API başarıları JSON ve ok: true döndürür.
-      }
-
-      const responsePath = request.responseURL
-        ? new URL(request.responseURL, window.location.href).pathname
-        : "";
-      const contentType = request.getResponseHeader("content-type") ?? "";
-      const ok =
-        request.status >= 200 &&
-        request.status < 300 &&
-        responsePath !== "/login" &&
-        contentType.includes("application/json") &&
-        payload.ok === true;
-
-      setProgress(ok ? 96 : null);
-      resolve({
-        error:
-          responsePath === "/login"
-            ? "Oturum süresi doldu. Giriş yaptıktan sonra tekrar deneyin."
-            : payload.error,
-        ok,
-        status: responsePath === "/login" ? 401 : request.status,
-      });
-    };
-
-    request.send(formData);
-  });
 }
 
 function refreshFormLocation(form: HTMLFormElement, formData: FormData) {
@@ -215,16 +115,25 @@ export function PersonnelArriveForm({
   disabled,
   disabledMessage,
   taskId,
+  userId,
+  projectId,
+  defaultHeadcount,
+  onStored,
 }: Readonly<{
   children: React.ReactNode;
   disabled?: boolean;
   disabledMessage?: string;
   taskId: string;
+  userId: string;
+  projectId: string;
+  defaultHeadcount?: number | null;
+  onStored?: () => void;
 }>) {
   const router = useRouter();
   const { state, setState } = useSubmissionState();
   const submittingRef = useRef(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isStored, setIsStored] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -250,7 +159,10 @@ export function PersonnelArriveForm({
         formData,
         (message) => setState((current) => ({ ...current, message })),
         (progress) => setState((current) => ({ ...current, progress })),
+        { userId, projectId },
       );
+      if (result !== "failed") setIsStored(true);
+      if (result === "synced" || result === "queued") onStored?.();
       if (result === "synced") {
         router.refresh();
       }
@@ -269,9 +181,14 @@ export function PersonnelArriveForm({
       <input name="taskId" type="hidden" value={taskId} />
       <fieldset
         className="flex w-full flex-col items-center"
-        disabled={disabled || isSubmitting}
+        disabled={disabled || isSubmitting || isStored}
       >
         {children}
+        {defaultHeadcount !== undefined && defaultHeadcount !== null ? (
+          <label className="mt-4 flex flex-col gap-2 text-sm">Bugün sahaya gelen ekip mevcudu
+            <input className="rounded-md border px-3 py-2" defaultValue={defaultHeadcount} min={0} max={500} name="actualHeadcount" required type="number" />
+          </label>
+        ) : null}
       </fieldset>
       <SubmissionNotice
         isWorking={isSubmitting}
@@ -288,15 +205,22 @@ export function PersonnelLeaveForm({
   children,
   hasTodayNote,
   taskId,
+  userId,
+  projectId,
+  onStored,
 }: Readonly<{
   children: React.ReactNode;
   hasTodayNote: boolean;
   taskId: string;
+  userId: string;
+  projectId: string;
+  onStored?: () => void;
 }>) {
   const router = useRouter();
   const { state, setState } = useSubmissionState();
   const submittingRef = useRef(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isStored, setIsStored] = useState(false);
   const [confirmSeconds, setConfirmSeconds] = useState(0);
   const isConfirming = confirmSeconds > 0;
 
@@ -322,7 +246,7 @@ export function PersonnelLeaveForm({
       return;
     }
 
-    if (!hasTodayNote) {
+    if (!hasTodayNote && !(await hasPendingPersonnelNote(userId, taskId))) {
       setState((current) => ({
         ...current,
         message: "Bugün yaptıklarının notunu yaz!",
@@ -357,7 +281,10 @@ export function PersonnelLeaveForm({
         formData,
         (message) => setState((current) => ({ ...current, message })),
         (progress) => setState((current) => ({ ...current, progress })),
+        { userId, projectId },
       );
+      if (result !== "failed") setIsStored(true);
+      if (result === "synced" || result === "queued") onStored?.();
       if (result === "synced") {
         router.refresh();
       }
@@ -382,7 +309,7 @@ export function PersonnelLeaveForm({
               ? "bg-orange-500 hover:bg-orange-600 focus:ring-orange-200"
               : "bg-red-600 hover:bg-red-700 focus:ring-red-200"
           }`}
-          disabled={isSubmitting}
+          disabled={isSubmitting || isStored}
           type="submit"
         >
           {isConfirming ? (
@@ -403,14 +330,19 @@ export function PersonnelLeaveForm({
 export function PersonnelNoteForm({
   children,
   taskId,
+  userId,
+  projectId,
 }: Readonly<{
   children: React.ReactNode;
   taskId: string;
+  userId: string;
+  projectId: string;
 }>) {
   const router = useRouter();
   const { state, setState } = useSubmissionState();
   const submittingRef = useRef(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [files, setFiles] = useState<File[]>([]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -436,9 +368,11 @@ export function PersonnelNoteForm({
         formData,
         (message) => setState((current) => ({ ...current, message })),
         (progress) => setState((current) => ({ ...current, progress })),
+        { userId, projectId, files },
       );
-      if (result === "synced") {
+      if (result !== "failed") {
         form.reset();
+        setFiles([]);
         router.refresh();
       }
     } finally {
@@ -450,7 +384,11 @@ export function PersonnelNoteForm({
   return (
     <form aria-busy={isSubmitting} className="w-full text-left" onSubmit={handleSubmit}>
       <input name="taskId" type="hidden" value={taskId} />
-      <fieldset disabled={isSubmitting}>{children}</fieldset>
+      <fieldset disabled={isSubmitting}>
+        {children}
+        <PersonnelMediaPicker files={files} onChange={setFiles} />
+        <button className="mt-5 w-full rounded-md border border-primary bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-60" type="submit">{isSubmitting ? "Kaydediliyor..." : "Kaydet"}</button>
+      </fieldset>
       <SubmissionNotice isWorking={isSubmitting} state={state} />
     </form>
   );

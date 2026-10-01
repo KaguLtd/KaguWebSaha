@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { requireUser } from "@/lib/auth/session";
+import { getCurrentUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/prisma";
 import { scheduleHeicConversionProcessing } from "@/lib/files/heic-conversion-jobs";
 import {
@@ -9,11 +9,12 @@ import {
 } from "@/lib/files/image-thumbnail-jobs";
 
 export async function GET() {
-  const user = await requireUser();
+  const user = await getCurrentUser();
   const activeStatuses: ("PENDING" | "PROCESSING")[] = ["PENDING", "PROCESSING"];
-  await queueMissingProjectFileThumbnails(25);
+  if (!user) return NextResponse.json({ error: "Oturum süresi doldu." }, { status: 401 });
+  if (user.role === "ADMIN") await queueMissingProjectFileThumbnails(25);
   const where =
-    user.role === "PERSONNEL"
+    user.role !== "ADMIN"
       ? {
           uploadedByUserId: user.id,
           status: {
@@ -31,6 +32,7 @@ export async function GET() {
   });
   const pendingThumbnailCount = await prisma.imageThumbnailJob.count({
     where: {
+      ...(user.role !== "ADMIN" ? { projectFile: { uploadedByUserId: user.id } } : {}),
       status: {
         in: activeStatuses,
       },
@@ -38,7 +40,7 @@ export async function GET() {
   });
   const latestCompletedJob = await prisma.heicConversionJob.findFirst({
     where: {
-      ...(user.role === "PERSONNEL" ? { uploadedByUserId: user.id } : {}),
+      ...(user.role !== "ADMIN" ? { uploadedByUserId: user.id } : {}),
       status: "COMPLETED",
       completedAt: {
         not: null,
@@ -54,6 +56,7 @@ export async function GET() {
   });
   const latestCompletedThumbnailJob = await prisma.imageThumbnailJob.findFirst({
     where: {
+      ...(user.role !== "ADMIN" ? { projectFile: { uploadedByUserId: user.id } } : {}),
       status: "COMPLETED",
       completedAt: {
         not: null,
@@ -74,6 +77,10 @@ export async function GET() {
       ? latestCompletedThumbnailJob
       : latestCompletedJob;
   const totalPendingCount = pendingCount + pendingThumbnailCount;
+  const [failedHeicCount, failedThumbnailCount] = await Promise.all([
+    prisma.heicConversionJob.count({ where: { ...(user.role !== "ADMIN" ? { uploadedByUserId: user.id } : {}), status: "FAILED" } }),
+    prisma.imageThumbnailJob.count({ where: { ...(user.role !== "ADMIN" ? { projectFile: { uploadedByUserId: user.id } } : {}), status: "FAILED" } }),
+  ]);
 
   if (pendingCount > 0) {
     scheduleHeicConversionProcessing();
@@ -88,5 +95,6 @@ export async function GET() {
       ? `${latestCompleted.completedAt.toISOString()}:${latestCompleted.id}`
       : null,
     pendingCount: totalPendingCount,
+    failedCount: failedHeicCount + failedThumbnailCount,
   });
 }

@@ -4,10 +4,8 @@ import { MapPin } from "lucide-react";
 import { CompactFilePreview } from "@/components/files/compact-file-preview";
 import { FilePreviewGrid } from "@/components/files/file-preview";
 import { LocationDescription } from "@/components/location/location-description";
-import { LocationFields } from "@/components/personnel/location-fields";
+import { PersonnelSiteActions } from "@/components/personnel/site-actions";
 import {
-  PersonnelArriveForm,
-  PersonnelLeaveForm,
   PersonnelNoteForm,
 } from "@/components/personnel/offline-task-forms";
 import {
@@ -43,6 +41,7 @@ export default async function PersonnelTaskDetailPage({
         },
       },
       include: {
+        assignees: { where: { userId: user.id } },
         project: {
           include: {
             customer: true,
@@ -128,36 +127,11 @@ export default async function PersonnelTaskDetailPage({
           </p>
 
           <div className="mt-8 flex justify-center">
-            {task.status === "PLANNED" ? (
-              <PersonnelArriveForm
-                disabled={activeOtherOnSiteTask}
-                disabledMessage="Önce aktif sahadaki görevi kapatmalısın."
-                taskId={task.id}
-              >
-                <LocationFields />
-                <button
-                  className="flex h-44 w-44 items-center justify-center rounded-full bg-emerald-600 px-6 text-center text-2xl font-semibold leading-tight text-white shadow-lg transition hover:bg-emerald-700 focus:outline-none focus:ring-4 focus:ring-emerald-200 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-600 disabled:shadow-none"
-                  disabled={activeOtherOnSiteTask}
-                  type="submit"
-                >
-                  Sahaya Ulaştım
-                </button>
-              </PersonnelArriveForm>
-            ) : null}
-
-            {task.status === "ON_SITE" ? (
-              <div className="flex w-full flex-col items-center gap-5">
-                <PersonnelLeaveForm hasTodayNote={hasTodayNote} taskId={task.id}>
-                  <LocationFields />
-                </PersonnelLeaveForm>
-              </div>
-            ) : null}
-
-            {task.status === "COMPLETED" ? (
-              <div className="flex h-44 w-44 items-center justify-center rounded-full bg-slate-300 px-6 text-center text-2xl font-semibold leading-tight text-slate-700">
-                Tamamlandı
-              </div>
-            ) : null}
+            <PersonnelSiteActions
+              status={task.status} taskId={task.id} userId={user.id} projectId={task.projectId}
+              hasTodayNote={hasTodayNote} activeOtherTaskId={activeOtherOnSiteTask ? activeOnSiteTask?.id : undefined}
+              defaultHeadcount={task.assignees[0]?.workforceKindSnapshot === "CONTRACTOR" ? task.assignees[0].headcountSnapshot : undefined}
+            />
           </div>
         </section>
 
@@ -166,7 +140,7 @@ export default async function PersonnelTaskDetailPage({
           <p className="mt-2 text-sm text-muted-foreground">
             Fotoğraf, PDF, Excel, DWG veya başka dosyalar eklenebilir.
           </p>
-          <PersonnelNoteForm taskId={task.id}>
+          <PersonnelNoteForm taskId={task.id} userId={user.id} projectId={task.projectId}>
             <div className="mt-4 flex flex-col gap-2">
               <label className="text-sm font-medium" htmlFor="note">
                 Not
@@ -179,24 +153,6 @@ export default async function PersonnelTaskDetailPage({
                 rows={5}
               />
             </div>
-            <div className="mt-4 flex flex-col gap-2">
-              <label className="text-sm font-medium" htmlFor="files">
-                Dosya / fotoğraf
-              </label>
-              <input
-                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-navy shadow-sm file:mr-3 file:rounded-md file:border file:border-navy/20 file:bg-white file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-navy file:shadow-sm hover:file:bg-primary/10"
-                id="files"
-                multiple
-                name="files"
-                type="file"
-              />
-            </div>
-            <button
-              className="mt-5 w-full rounded-md border border-primary bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-sm transition hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-60"
-              type="submit"
-            >
-              Kaydet
-            </button>
           </PersonnelNoteForm>
         </section>
 

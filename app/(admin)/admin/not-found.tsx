@@ -11,7 +11,7 @@ export default function AdminNotFound() {
           Aradigin kayit silinmis, pasif hale gelmis veya bu alandan acilamiyor.
         </p>
         <Button asChild className="mt-5">
-          <Link href="/admin">Dashboard'a don</Link>
+          <Link href="/admin">Dashboard&apos;a don</Link>
         </Button>
       </section>
     </main>

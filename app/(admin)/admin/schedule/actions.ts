@@ -7,6 +7,8 @@ import { saveProjectUpload } from "@/lib/files/storage";
 import { parseDateOnly } from "@/lib/dates/calendar";
 import { requireRole } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/prisma";
+import { buildAssignmentSnapshots } from "@/lib/teams/assignments";
+import { parseActualHeadcount } from "@/lib/teams/headcount";
 
 function readRequiredText(formData: FormData, name: string) {
   const value = String(formData.get(name) ?? "").trim();
@@ -24,14 +26,12 @@ export async function createDailyTaskAction(formData: FormData) {
   const taskDate = parseDateOnly(readRequiredText(formData, "taskDate"));
   const projectId = readRequiredText(formData, "projectId");
   const managerNote = String(formData.get("managerNote") ?? "").trim();
-  const assigneeIds = formData
-    .getAll("assigneeIds")
-    .map(String)
-    .filter(Boolean);
 
   if (!taskDate) {
     throw new Error("Gecersiz tarih.");
   }
+  const assignmentSnapshots = await buildAssignmentSnapshots(formData, taskDate);
+  const assigneeIds = assignmentSnapshots.map((item) => item.userId);
 
   const project = await prisma.project.findUnique({
     where: {
@@ -62,9 +62,7 @@ export async function createDailyTaskAction(formData: FormData) {
       managerNote: managerNote || null,
       createdByUserId: user.id,
       assignees: {
-        create: assigneeIds.map((userId) => ({
-          userId,
-        })),
+        create: assignmentSnapshots,
       },
       events: {
         create: {
@@ -125,10 +123,6 @@ export async function updateDailyTaskAction(formData: FormData) {
   const taskId = readRequiredText(formData, "taskId");
   const managerNote = String(formData.get("managerNote") ?? "").trim();
   const noteToTimeline = String(formData.get("timelineNote") ?? "").trim();
-  const assigneeIds = formData
-    .getAll("assigneeIds")
-    .map(String)
-    .filter(Boolean);
 
   const task = await prisma.dailyTask.findUnique({
     where: {
@@ -143,11 +137,14 @@ export async function updateDailyTaskAction(formData: FormData) {
   if (!task) {
     throw new Error("Gorev bulunamadi.");
   }
+  const assignmentSnapshots = task.status === "PLANNED" ? await buildAssignmentSnapshots(formData, task.taskDate, task.assignees) : task.assignees;
+  const assigneeIds = assignmentSnapshots.map((item) => item.userId);
 
   await prisma.$transaction(async (tx) => {
     await tx.dailyTask.update({
       where: {
         id: task.id,
+        status: task.status,
       },
       data: {
         managerNote: managerNote || null,
@@ -155,9 +152,7 @@ export async function updateDailyTaskAction(formData: FormData) {
           ? {
               assignees: {
                 deleteMany: {},
-                create: assigneeIds.map((userId) => ({
-                  userId,
-                })),
+                create: assignmentSnapshots.map(({ userId, teamId, teamNameSnapshot, headcountSnapshot, actualHeadcount, workforceKindSnapshot }) => ({ userId, teamId, teamNameSnapshot, headcountSnapshot, actualHeadcount, workforceKindSnapshot })),
               },
             }
           : {}),
@@ -262,6 +257,7 @@ export async function removeDailyTaskAction(formData: FormData) {
     await tx.dailyTask.delete({
       where: {
         id: task.id,
+        status: "PLANNED",
       },
     });
 
@@ -278,6 +274,29 @@ export async function removeDailyTaskAction(formData: FormData) {
 
   revalidatePath("/admin");
   revalidatePath("/admin/schedule");
+  revalidatePath(`/admin/schedule/tasks/${task.id}`);
+  revalidatePath(`/admin/projects/${task.projectId}`);
+}
+
+export async function correctTeamHeadcountAction(formData: FormData) {
+  const user = await requireRole("ADMIN");
+  const assignmentId = readRequiredText(formData, "assignmentId");
+  const reason = readRequiredText(formData, "reason");
+  if (reason.length < 3 || reason.length > 1000) throw new Error("Düzeltme açıklaması 3–1000 karakter olmalıdır.");
+  const actualHeadcount = parseActualHeadcount(formData.get("actualHeadcount"));
+  if (actualHeadcount === null) throw new Error("Sahaya gelen ekip mevcudunu girin.");
+  const assignment = await prisma.dailyTaskAssignee.findUnique({ where: { id: assignmentId }, include: { dailyTask: true } });
+  if (!assignment || assignment.workforceKindSnapshot !== "CONTRACTOR") throw new Error("Taşeron ekip ataması bulunamadı.");
+  const task = assignment.dailyTask;
+  if (!task.arrivedAt || task.status === "PLANNED") throw new Error("Fiili ekip mevcudu yalnız sahaya varıştan sonra doğrulanabilir.");
+  const description = `${assignment.teamNameSnapshot ?? "Taşeron ekip"}: fiili mevcud ${assignment.actualHeadcount ?? "bilinmiyor"} → ${actualHeadcount}. Açıklama: ${reason}`;
+  await prisma.$transaction(async (tx) => {
+    await tx.dailyTaskAssignee.update({ where: { id: assignment.id, actualHeadcount: assignment.actualHeadcount }, data: { actualHeadcount } });
+    await tx.taskEvent.create({ data: { dailyTaskId: task.id, projectId: task.projectId, userId: user.id, type: "NOTE_ADDED", note: description } });
+    await tx.projectTimelineEvent.create({ data: { projectId: task.projectId, dailyTaskId: task.id, userId: user.id, eventType: "NOTE_ADDED", title: "Yönetici ekip mevcudunu doğruladı", description } });
+  });
+  revalidatePath("/admin");
+  revalidatePath("/admin/reports");
   revalidatePath(`/admin/schedule/tasks/${task.id}`);
   revalidatePath(`/admin/projects/${task.projectId}`);
 }

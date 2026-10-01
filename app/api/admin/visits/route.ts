@@ -10,6 +10,8 @@ import {
 import { scheduleImageThumbnailProcessing } from "@/lib/files/image-thumbnail-jobs";
 import { saveProjectUpload, type ProjectUploadResult } from "@/lib/files/storage";
 import { parseLatitude, parseLongitude } from "@/lib/location/google-maps";
+import { runOfflineOperation } from "@/lib/offline/server-operation";
+import { canAttachToVisit } from "@/lib/visits/status";
 
 function readText(formData: FormData, name: string) {
   return String(formData.get(name) ?? "").trim();
@@ -72,7 +74,7 @@ async function requireVisitProject(projectId: string, userRole: "ADMIN" | "OBSER
   return project;
 }
 
-async function readValidProjectVisit(projectVisitId: string, projectId: string) {
+async function readValidProjectVisit(projectVisitId: string, projectId: string, userId: string, userRole: "ADMIN" | "OBSERVER") {
   const visit = await prisma.projectVisit.findFirst({
     where: {
       id: projectVisitId,
@@ -81,11 +83,15 @@ async function readValidProjectVisit(projectVisitId: string, projectId: string) 
     select: {
       id: true,
       note: true,
+      visitedByUserId: true,
     },
   });
 
   if (!visit) {
     throw new Error("Ziyaret kaydi bulunamadi.");
+  }
+  if (!canAttachToVisit(userRole, userId, visit.visitedByUserId)) {
+    throw new Error("Yalnızca kendi ziyaretinize not veya dosya ekleyebilirsiniz.");
   }
 
   return visit;
@@ -117,9 +123,18 @@ export async function POST(request: Request) {
         },
         select: {
           status: true,
+          userId: true,
+          type: true,
+          payload: true,
         },
       });
 
+      if (existing && (existing.userId !== user.id || existing.type !== "FILE" ||
+          !(existing.payload && typeof existing.payload === "object" && !Array.isArray(existing.payload) &&
+            existing.payload.projectId === project.id &&
+            (existing.payload.projectVisitId ?? null) === (readText(formData, "projectVisitId") || null)))) {
+        throw new Error("İşlem kimliği farklı bir kayıt için kullanılmış.");
+      }
       if (existing?.status === "SYNCED") {
         return NextResponse.json({ ok: true, duplicate: true });
       }
@@ -130,7 +145,12 @@ export async function POST(request: Request) {
       const { latitude, longitude } = readLocation(formData);
       const now = new Date();
 
-      const visit = await prisma.$transaction(async (tx) => {
+      const result = await runOfflineOperation({
+        userId: user.id,
+        clientItemId: clientItemId || undefined,
+        type: "NOTE",
+        payload: { operation: "visit", projectId: project.id },
+      }, async (tx) => {
         const projectVisit = await tx.projectVisit.create({
           data: {
             projectId: project.id,
@@ -190,22 +210,27 @@ export async function POST(request: Request) {
           });
         }
 
-        return projectVisit;
+        return { visitId: projectVisit.id };
       });
 
       revalidateVisitPaths(project.id);
 
-      return NextResponse.json({ ok: true, visitId: visit.id });
+      return NextResponse.json({ ok: true, visitId: result.visitId });
     }
 
     if (operation === "note") {
       const note = readRequiredText(formData, "note");
       const projectVisitId = readText(formData, "projectVisitId") || null;
       const visit = projectVisitId
-        ? await readValidProjectVisit(projectVisitId, project.id)
+        ? await readValidProjectVisit(projectVisitId, project.id, user.id, userRole)
         : null;
 
-      await prisma.$transaction(async (tx) => {
+      await runOfflineOperation({
+        userId: user.id,
+        clientItemId: clientItemId || undefined,
+        type: "NOTE",
+        payload: { operation: "visit-note", projectId: project.id, projectVisitId, note },
+      }, async (tx) => {
         await tx.projectNote.create({
           data: {
             projectId: project.id,
@@ -235,6 +260,7 @@ export async function POST(request: Request) {
             description: note,
           },
         });
+        return { visitId: visit?.id ?? null };
       });
 
       revalidateVisitPaths(project.id);
@@ -246,7 +272,7 @@ export async function POST(request: Request) {
       const note = readText(formData, "note");
       const projectVisitId = readText(formData, "projectVisitId") || null;
       const visit = projectVisitId
-        ? await readValidProjectVisit(projectVisitId, project.id)
+        ? await readValidProjectVisit(projectVisitId, project.id, user.id, userRole)
         : null;
       const files = formData
         .getAll("files")
@@ -382,6 +408,8 @@ function isVisitRequestError(message: string) {
     "Proje bulunamadi.",
     "arsiv projeye ziyaret kaydi ekleyemez.",
     "Ziyaret kaydi bulunamadi.",
+    "Yalnızca kendi ziyaretinize",
+    "İşlem kimliği",
     "Yuklenecek dosya secilmedi.",
     "Not yazin veya en az bir dosya secin.",
     "Dosya boyutu 100 MB limitini asamaz.",

@@ -98,6 +98,17 @@ Expected response:
 
 See `docs/ACCEPTANCE_TEST.md` for the full manual acceptance checklist.
 
+For V1.1 on an existing active installation, follow [V1.1 release notes](docs/V1_1_UYGULAMA_VE_YAYIN.md). The update requires the additive migration and a supervised media worker; do not reset/seed existing data or repeat first-admin bootstrap as an update step.
+
+```bash
+npm test
+npm run typecheck
+npm run lint
+npm run build
+# Separate service, same database/storage environment:
+npm run worker:media
+```
+
 ## Go-Live
 
 After acceptance testing passes, use `docs/GO_LIVE.md` before resetting test data or entering real customer/project records.
@@ -109,5 +120,5 @@ After acceptance testing passes, use `docs/GO_LIVE.md` before resetting test dat
 - Personnel see only today's tasks assigned to them.
 - Project history is append-only timeline data.
 - Location is captured only at event moments.
-- Offline support is personnel-only pending queue behavior.
+- Offline support covers personnel pending events/media and visit file uploads; first-load offline navigation and execution while a phone is locked are not guaranteed.
 - Development-time agents are not production dependencies.

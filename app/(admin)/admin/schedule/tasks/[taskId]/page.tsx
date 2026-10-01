@@ -8,6 +8,9 @@ import { toDateInputValue } from "@/lib/dates/calendar";
 import { formatDisplayDateOnly } from "@/lib/dates/format";
 import { prisma } from "@/lib/db/prisma";
 import { requireRole } from "@/lib/auth/session";
+import { TeamAssigneeFields } from "@/components/admin/team-assignee-fields";
+import { teamHeadcount } from "@/lib/teams/headcount";
+import { TeamHeadcountCorrections } from "@/components/admin/team-headcount-corrections";
 
 export const dynamic = "force-dynamic";
 
@@ -90,6 +93,7 @@ export default async function ScheduleTaskPage({
   });
 
   const canEditAssignees = task.status === "PLANNED";
+  const teams = await prisma.team.findMany({ include: { representative: true }, orderBy: { name: "asc" } });
 
   const backHref = `/admin/schedule?${new URLSearchParams({
     ...(query?.month ? { month: query.month } : {}),
@@ -141,7 +145,7 @@ export default async function ScheduleTaskPage({
 
             <div className="flex flex-col gap-2">
               <label className="text-sm font-medium" htmlFor="timelineNote">
-                Timeline'a yeni not ekle
+                Timeline&apos;a yeni not ekle
               </label>
               <textarea
                 className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-navy outline-none transition focus:ring-2 focus:ring-primary"
@@ -151,40 +155,7 @@ export default async function ScheduleTaskPage({
               />
             </div>
 
-            <fieldset className="flex flex-col gap-3 rounded-md border border-navy/10 bg-primary/5 p-3">
-              <legend className="px-1 text-sm font-medium">
-                Atanan personeller
-              </legend>
-              {!canEditAssignees ? (
-                <p className="text-sm text-muted-foreground">
-                  Gorev sahada veya tamamlanmis oldugu icin personel degistirilemez.
-                </p>
-              ) : null}
-              {personnel.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  Uygun personel yok.
-                </p>
-              ) : (
-                personnel.map((person) => (
-                  <label
-                    className="flex items-center gap-3 text-sm"
-                    htmlFor={`person-${person.id}`}
-                    key={person.id}
-                  >
-                    <input
-                      className="h-4 w-4"
-                      defaultChecked={selectedAssigneeIds.has(person.id)}
-                      disabled={!canEditAssignees}
-                      id={`person-${person.id}`}
-                      name="assigneeIds"
-                      type="checkbox"
-                      value={person.id}
-                    />
-                    {person.fullName}
-                  </label>
-                ))
-              )}
-            </fieldset>
+            <TeamAssigneeFields disabled={!canEditAssignees} taskDate={toDateInputValue(task.taskDate)} personnel={personnel.map((person) => ({ id: person.id, fullName: person.fullName }))} assignments={task.assignees.map((assignee) => ({ id: assignee.userId, fullName: assignee.user.fullName, teamId: assignee.teamId, teamNameSnapshot: assignee.teamNameSnapshot, headcountSnapshot: assignee.headcountSnapshot }))} teams={teams.map((team) => ({ id: team.id, name: team.name, representativeUserId: team.representativeUserId, representativeName: team.representative.fullName, headcount: teamHeadcount(team.extraPersonnelCount, team.includeRepresentative), isActive: team.isActive && team.representative.isActive && team.representative.role === "PERSONNEL", effectiveFrom: toDateInputValue(team.effectiveFrom) }))} />
 
             <div className="flex flex-col gap-2">
               <label className="text-sm font-medium" htmlFor="files">
@@ -203,11 +174,12 @@ export default async function ScheduleTaskPage({
               <PendingSubmitButton>Kaydet</PendingSubmitButton>
               <Button asChild type="button" variant="outline">
                 <Link href={`/admin/projects/${task.projectId}`}>
-                  Proje timeline'ini ac
+                  Proje timeline&apos;ini ac
                 </Link>
               </Button>
             </div>
           </form>
+          {task.arrivedAt && task.status !== "PLANNED" ? <TeamHeadcountCorrections assignments={task.assignees.filter((assignee) => assignee.workforceKindSnapshot === "CONTRACTOR").map((assignee) => ({ id: assignee.id, name: assignee.teamNameSnapshot ?? assignee.user.fullName, planned: assignee.headcountSnapshot, actual: assignee.actualHeadcount }))} /> : null}
         </section>
       </div>
     </main>

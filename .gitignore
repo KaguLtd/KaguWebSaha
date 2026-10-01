@@ -1,10 +1,11 @@
 node_modules
 .next
+.next-v11-check
 out
 dist
 .env
 .env.local
 .env.*.local
-uploads
+/uploads/
 *.log
 

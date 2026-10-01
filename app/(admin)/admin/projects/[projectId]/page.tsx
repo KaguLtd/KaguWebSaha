@@ -51,7 +51,7 @@ export default async function ProjectDetailPage({
     },
   });
 
-  if (!project) {
+  if (!project || (user.role === "OBSERVER" && !project.isActive)) {
     notFound();
   }
 

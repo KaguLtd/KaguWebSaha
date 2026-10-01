@@ -12,6 +12,8 @@ import {
 import { prisma } from "@/lib/db/prisma";
 import { requireAnyRole } from "@/lib/auth/session";
 import { completeStaleOnSiteTasks } from "@/lib/tasks/rollover";
+import { readProjectVisits, type VisitRecord } from "@/lib/visits/read";
+import { summarizeVisits } from "@/lib/visits/status";
 
 type DashboardTask = Prisma.DailyTaskGetPayload<{
   include: {
@@ -35,7 +37,8 @@ type DashboardTask = Prisma.DailyTaskGetPayload<{
 }>;
 
 export default async function AdminPage() {
-  await requireAnyRole(["ADMIN", "OBSERVER"]);
+  const user = await requireAnyRole(["ADMIN", "OBSERVER"]);
+  const isObserver = user.role === "OBSERVER";
   await completeStaleOnSiteTasks();
   const today = getTodayDateOnly();
   const yesterday = addDateOnlyDays(today, -1);
@@ -44,6 +47,7 @@ export default async function AdminPage() {
       taskDate: {
         gte: today,
       },
+      ...(isObserver ? { project: { isActive: true } } : {}),
     },
     include: {
       assignees: {
@@ -63,6 +67,7 @@ export default async function AdminPage() {
       },
       timelineEvents: {
         where: {
+          ...(isObserver ? { userId: user.id } : {}),
           eventType: {
             in: ["NOTE_ADDED", "FILE_ADDED"],
           },
@@ -81,6 +86,7 @@ export default async function AdminPage() {
   const yesterdayTasksPromise = prisma.dailyTask.findMany({
     where: {
       taskDate: yesterday,
+      ...(isObserver ? { project: { isActive: true } } : {}),
     },
     include: {
       assignees: {
@@ -100,6 +106,7 @@ export default async function AdminPage() {
       },
       timelineEvents: {
         where: {
+          ...(isObserver ? { userId: user.id } : {}),
           eventType: {
             in: ["NOTE_ADDED", "FILE_ADDED"],
           },
@@ -115,13 +122,19 @@ export default async function AdminPage() {
     },
     orderBy: [{ createdAt: "asc" }],
   });
+  const todayRange = getDateOnlyRangeInAppTimeZone(today);
+  const visitsPromise = readProjectVisits({
+    start: todayRange.start,
+    end: todayRange.end,
+    ...(isObserver ? { userId: user.id, activeOnly: true } : {}),
+  });
 
   return (
     <main className="p-6 text-navy">
       <div className="mx-auto max-w-6xl">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h1 className="text-3xl font-semibold text-navy">Yonetici Dashboard</h1>
+            <h1 className="text-3xl font-semibold text-navy">{isObserver ? "Saha Kontrol Dashboard" : "Yonetici Dashboard"}</h1>
             <p className="mt-2 text-muted-foreground">
               Bugunun ve gelecek gunlerin planlanmis saha isleri.
             </p>
@@ -131,16 +144,19 @@ export default async function AdminPage() {
           </p>
         </div>
 
-        <TaskTable tasksPromise={tasksPromise} />
-        <YesterdaySection tasksPromise={yesterdayTasksPromise} yesterday={yesterday} />
+        <TaskTable hideAssignees={isObserver} tasksPromise={tasksPromise} />
+        <YesterdaySection hideAssignees={isObserver} tasksPromise={yesterdayTasksPromise} yesterday={yesterday} />
+        <TodayVisitsSection visitsPromise={visitsPromise} />
       </div>
     </main>
   );
 }
 
 async function TaskTable({
+  hideAssignees,
   tasksPromise,
 }: {
+  hideAssignees: boolean;
   tasksPromise: Promise<DashboardTask[]>;
 }) {
   const tasks = await tasksPromise;
@@ -153,7 +169,7 @@ async function TaskTable({
         <h2 className="text-lg font-semibold">Planlanmis is yok</h2>
         <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted-foreground">
           Bugun veya gelecek tarihler icin henuz saha gorevi olusturulmamis.
-          Gecmis isler dashboard'da gosterilmez; proje timeline'inda incelenir.
+          Gecmis isler dashboard&apos;da gosterilmez; proje timeline&apos;inda incelenir.
         </p>
       </section>
     );
@@ -174,7 +190,7 @@ async function TaskTable({
           </div>
           <div className="grid gap-3 p-3 md:hidden">
             {group.tasks.map((task) => (
-              <DashboardTaskCard task={task} key={task.id} />
+              <DashboardTaskCard hideAssignees={hideAssignees} task={task} key={task.id} />
             ))}
           </div>
           <div className="hidden overflow-x-auto md:block">
@@ -182,7 +198,7 @@ async function TaskTable({
               <thead className="border-b border-navy/10 bg-slate-50 text-xs uppercase text-slate-950">
                 <tr>
                   <th className="w-[28%] px-4 py-3 font-semibold">Proje / Cari</th>
-                  <th className="w-[22%] px-4 py-3 font-semibold">Atanan Personeller</th>
+                  {!hideAssignees ? <th className="w-[22%] px-4 py-3 font-semibold">Atanan Personeller</th> : null}
                   <th className="w-[34%] px-4 py-3 font-semibold">Bugun Yapilanlar</th>
                   <th className="w-[16%] px-4 py-3 font-semibold">Durum</th>
                 </tr>
@@ -201,7 +217,7 @@ async function TaskTable({
                         {task.project.customer.name}
                       </div>
                     </td>
-                    <td className="px-4 py-4">
+                    {!hideAssignees ? <td className="px-4 py-4">
                       <div className="flex flex-wrap gap-1.5">
                         {task.assignees.length > 0 ? (
                           task.assignees.map((assignee) => (
@@ -216,7 +232,7 @@ async function TaskTable({
                           <span className="text-sm text-muted-foreground">Atama yok</span>
                         )}
                       </div>
-                    </td>
+                    </td> : null}
                     <td className="px-4 py-4">
                       <TodayWork task={task} />
                     </td>
@@ -235,16 +251,18 @@ async function TaskTable({
 }
 
 async function YesterdaySection({
+  hideAssignees,
   tasksPromise,
   yesterday,
 }: {
+  hideAssignees: boolean;
   tasksPromise: Promise<DashboardTask[]>;
   yesterday: Date;
 }) {
   const tasks = await tasksPromise;
   const { end, start } = getDateOnlyRangeInAppTimeZone(yesterday);
   const unfinishedCount = tasks.filter((task) => task.status !== "COMPLETED").length;
-  const tasksWithoutNotes = tasks.filter((task) => {
+  const tasksWithoutNotes = hideAssignees ? [] : tasks.filter((task) => {
     const taskNotes = task.timelineEvents.filter(
       (event) =>
         event.eventType === "NOTE_ADDED" &&
@@ -293,11 +311,11 @@ async function YesterdaySection({
                   </div>
                   <StatusBadge status={task.status} />
                 </div>
-                <p className="mt-3 text-xs text-muted-foreground">
+                {!hideAssignees ? <p className="mt-3 text-xs text-muted-foreground">
                   {task.assignees.length > 0
                     ? task.assignees.map((assignee) => assignee.user.fullName).join(", ")
                     : "Atama yok"}
-                </p>
+                </p> : null}
               </article>
             ))}
           </div>
@@ -315,7 +333,7 @@ async function YesterdaySection({
   );
 }
 
-function DashboardTaskCard({ task }: { task: DashboardTask }) {
+function DashboardTaskCard({ hideAssignees, task }: { hideAssignees: boolean; task: DashboardTask }) {
   return (
     <article className="rounded-md border border-navy/10 bg-white p-3">
       <div className="flex items-start justify-between gap-3">
@@ -332,7 +350,7 @@ function DashboardTaskCard({ task }: { task: DashboardTask }) {
         </div>
         <StatusBadge status={task.status} />
       </div>
-      <div className="mt-3 flex flex-wrap gap-1.5">
+      {!hideAssignees ? <div className="mt-3 flex flex-wrap gap-1.5">
         {task.assignees.length > 0 ? (
           task.assignees.map((assignee) => (
             <span
@@ -345,11 +363,42 @@ function DashboardTaskCard({ task }: { task: DashboardTask }) {
         ) : (
           <span className="text-sm text-muted-foreground">Atama yok</span>
         )}
-      </div>
+      </div> : null}
       <div className="mt-3">
         <TodayWork task={task} />
       </div>
     </article>
+  );
+}
+
+async function TodayVisitsSection({ visitsPromise }: { visitsPromise: Promise<VisitRecord[]> }) {
+  const visits = await visitsPromise;
+  const totals = summarizeVisits(visits);
+  return (
+    <section className="mt-6 overflow-hidden rounded-lg border border-navy/10 bg-white shadow-card">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-navy/10 bg-slate-50 px-4 py-3">
+        <h2 className="text-lg font-semibold text-navy">Bugün Ziyaret Edilenler</h2>
+        <p className="text-xs text-muted-foreground">{totals.projects} şantiye / {totals.visits} ziyaret</p>
+      </div>
+      {visits.length === 0 ? <p className="p-5 text-sm text-muted-foreground">Bugün ziyaret kaydı yok.</p> : (
+        <div className="grid gap-3 p-4 md:grid-cols-2">
+          {visits.map((visit) => (
+            <article className="rounded-md border border-navy/10 p-3" key={`${visit.source}:${visit.id}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <Link className="font-semibold text-primary hover:underline" href={`/admin/visits/${visit.projectId}`}>{visit.projectName}</Link>
+                  <p className="mt-1 text-xs text-muted-foreground">{visit.customerName}</p>
+                </div>
+                <span className="shrink-0 text-xs text-muted-foreground">{formatDisplayTime(visit.visitedAt)}</span>
+              </div>
+              <p className="mt-3 text-sm">{visit.userName}</p>
+              {visit.note ? <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">{visit.note}</p> : null}
+              <p className="mt-2 text-xs text-muted-foreground">{visit.fileCount === null ? "Eski program ziyareti" : `${visit.fileCount} dosya`}</p>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 

@@ -1,24 +1,24 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Camera, ClipboardPenLine, MapPinCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { isCompressibleImage } from "@/lib/client/image-compression";
 import {
-  isCompressibleImage,
-  prepareFilesForUpload,
-} from "@/lib/client/image-compression";
-import {
-  enqueueVisitUpload,
+  enqueueVisitUploads,
   listOfflineItems,
-  replaceOfflineItemFiles,
   syncOfflineItems,
 } from "@/lib/offline/queue";
+import { createClientId } from "@/lib/offline/client-id";
+import { getVisitDayKey } from "@/lib/visits/status";
 
 type VisitInteractionPanelProps = {
   initialVisitId?: string | null;
+  currentDay: string;
   projectId: string;
+  userId: string;
 };
 
 type VisitResponse = {
@@ -29,10 +29,13 @@ type VisitResponse = {
 
 export function VisitInteractionPanel({
   initialVisitId,
+  currentDay,
   projectId,
+  userId,
 }: VisitInteractionPanelProps) {
   const [activeVisitId, setActiveVisitId] = useState(initialVisitId ?? "");
   const [isPending, setIsPending] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [pendingUploads, setPendingUploads] = useState(0);
@@ -40,12 +43,42 @@ export function VisitInteractionPanel({
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [visitConfirmation, setVisitConfirmation] = useState<"idle" | "confirm">("idle");
   const router = useRouter();
+  const visitClientId = useRef("");
+  const noteRequest = useRef<{ id: string; note: string; visitId: string } | null>(null);
+  const submitting = useRef(false);
+  const uploading = useRef(false);
+  const shownDay = useRef(currentDay);
+
+  useEffect(() => {
+    setActiveVisitId(initialVisitId ?? "");
+    shownDay.current = currentDay;
+  }, [currentDay, initialVisitId]);
+
+  useEffect(() => {
+    function checkDay() {
+      const nextDay = getVisitDayKey();
+      if (shownDay.current === nextDay) return;
+      shownDay.current = nextDay;
+      setActiveVisitId("");
+      setVisitConfirmation("idle");
+      visitClientId.current = "";
+      router.refresh();
+    }
+    const timer = window.setInterval(checkDay, 30_000);
+    window.addEventListener("focus", checkDay);
+    document.addEventListener("visibilitychange", checkDay);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", checkDay);
+      document.removeEventListener("visibilitychange", checkDay);
+    };
+  }, [router]);
 
   useEffect(() => {
     void syncVisitUploads();
 
     async function syncVisitUploads() {
-      const before = await listOfflineItems(["VISIT_UPLOAD"]);
+      const before = await listOfflineItems(["VISIT_UPLOAD"], userId);
       setPendingUploads(before.length);
 
       if (before.length === 0) {
@@ -54,6 +87,7 @@ export function VisitInteractionPanel({
 
       const result = await syncOfflineItems({
         kinds: ["VISIT_UPLOAD"],
+        userId,
         onProgress: ({ current, progress, total }) => {
           setUploadMessage(`${current}/${total} ziyaret kaydı yükleniyor...`);
           setUploadProgress(progress);
@@ -74,18 +108,37 @@ export function VisitInteractionPanel({
         router.refresh();
       }
     }
-  }, [router]);
+  }, [router, userId]);
 
   async function submit(formData: FormData, successMessage: string, withLocation = false) {
+    if (submitting.current) return false;
+    submitting.current = true;
     setIsPending(true);
     setMessage("");
     setError("");
 
     try {
       formData.set("projectId", projectId);
+      if (formData.get("operation") === "visit") {
+        visitClientId.current ||= createClientId();
+        formData.set("clientItemId", visitClientId.current);
+      }
+      if (getVisitDayKey() !== shownDay.current) {
+        setActiveVisitId("");
+        router.refresh();
+        throw new Error("Gün değişti. Ziyaret bilgisi yenileniyor; notunuz korundu, tekrar kaydedin.");
+      }
 
       if (activeVisitId && !formData.has("projectVisitId")) {
         formData.set("projectVisitId", activeVisitId);
+      }
+      if (formData.get("operation") === "note") {
+        const note = String(formData.get("note") ?? "").trim();
+        const visitId = String(formData.get("projectVisitId") ?? "");
+        if (!noteRequest.current || noteRequest.current.note !== note || noteRequest.current.visitId !== visitId) {
+          noteRequest.current = { id: createClientId(), note, visitId };
+        }
+        formData.set("clientItemId", noteRequest.current.id);
       }
 
       if (withLocation) {
@@ -107,18 +160,24 @@ export function VisitInteractionPanel({
       }
 
       setMessage(successMessage);
+      if (formData.get("operation") === "note") noteRequest.current = null;
       router.refresh();
+      return true;
     } catch (submitError) {
       setError(
         submitError instanceof Error ? submitError.message : "Islem kaydedilemedi.",
       );
+      return false;
     } finally {
+      submitting.current = false;
       setIsPending(false);
     }
   }
 
   async function submitFiles(form: HTMLFormElement) {
-    setIsPending(true);
+    if (uploading.current) return;
+    uploading.current = true;
+    setIsUploading(true);
     setMessage("");
     setError("");
     setUploadProgress(2);
@@ -132,26 +191,29 @@ export function VisitInteractionPanel({
     if (files.length === 0) {
       setError("Yüklenecek dosya seçilmedi.");
       setUploadProgress(null);
-      setIsPending(false);
+      uploading.current = false;
+      setIsUploading(false);
       return;
     }
 
-    let queuedItem;
+    let queuedItems;
     try {
-      queuedItem = await enqueueVisitUpload({
+      queuedItems = await enqueueVisitUploads({
+        userId,
         projectId,
         projectVisitId: activeVisitId || undefined,
         note: note || undefined,
         files,
       });
       form.reset();
-      setPendingUploads((current) => current + 1);
+      setPendingUploads((current) => current + queuedItems.length);
     } catch {
       setError(
         "Dosyalar cihazdaki güvenli kuyruğa alınamadı. Depolama alanını kontrol edip tekrar deneyin.",
       );
       setUploadProgress(null);
-      setIsPending(false);
+      uploading.current = false;
+      setIsUploading(false);
       return;
     }
 
@@ -170,9 +232,6 @@ export function VisitInteractionPanel({
       );
       setUploadProgress(6);
 
-      const preparedFiles = await prepareFilesForUpload(files);
-      await replaceOfflineItemFiles(queuedItem.id, preparedFiles);
-
       if (!navigator.onLine) {
         setUploadMessage("İnternet yok. Dosyalar cihazda saklandı ve bağlantıda yüklenecek.");
         setUploadProgress(null);
@@ -181,17 +240,19 @@ export function VisitInteractionPanel({
 
       const result = await syncOfflineItems({
         kinds: ["VISIT_UPLOAD"],
+        userId,
         onProgress: ({ current, progress, total }) => {
           setUploadMessage(`${current}/${total} ziyaret kaydı yükleniyor...`);
           setUploadProgress(progress);
         },
       });
-      const remainingItems = await listOfflineItems(["VISIT_UPLOAD"]);
-      const isStillQueued = remainingItems.some((item) => item.id === queuedItem.id);
+      const remainingItems = await listOfflineItems(["VISIT_UPLOAD"], userId);
+      const queuedIds = new Set(queuedItems.map((item) => item.id));
+      const isStillQueued = remainingItems.some((item) => queuedIds.has(item.id));
 
       setPendingUploads(remainingItems.length);
 
-      if (result.failedIds.includes(queuedItem.id)) {
+      if (result.failedIds.some((id) => queuedIds.has(id))) {
         setError(result.error || "Dosyalar kaydedilemedi.");
         setUploadMessage("");
         setUploadProgress(null);
@@ -214,8 +275,12 @@ export function VisitInteractionPanel({
         setUploadMessage("");
         setUploadProgress(null);
       }, 3500);
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "Dosyalar hazırlanamadı. Cihazdaki kayıt korundu; tekrar deneyin.");
+      setUploadProgress(null);
     } finally {
-      setIsPending(false);
+      uploading.current = false;
+      setIsUploading(false);
     }
   }
 
@@ -273,12 +338,12 @@ export function VisitInteractionPanel({
         <div className="grid gap-4 lg:grid-cols-2">
           <form
             className="flex flex-col gap-3 rounded-md border border-navy/10 bg-primary/5 p-3"
-            onSubmit={(event) => {
+            onSubmit={async (event) => {
               event.preventDefault();
-              const formData = new FormData(event.currentTarget);
+              const form = event.currentTarget;
+              const formData = new FormData(form);
               formData.set("operation", "note");
-              submit(formData, "Not eklendi.");
-              event.currentTarget.reset();
+              if (await submit(formData, "Not eklendi.")) form.reset();
             }}
           >
             <label className="flex items-center gap-2 text-sm font-medium text-navy" htmlFor="note">
@@ -322,7 +387,7 @@ export function VisitInteractionPanel({
               placeholder="Dosya notu, istege bagli"
               rows={2}
             />
-            <Button disabled={isPending} type="submit" variant="outline">
+            <Button disabled={isUploading} type="submit" variant="outline">
               Yukle
             </Button>
           </form>

@@ -1,10 +1,10 @@
-import { mkdir, unlink, writeFile } from "fs/promises";
+import { copyFile, mkdir, open, unlink, writeFile } from "fs/promises";
 import path from "path";
 import { randomUUID } from "crypto";
 import { Worker } from "worker_threads";
 
 const DEFAULT_UPLOAD_DIR = "uploads";
-const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
+export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 const HEIC_MIME_TYPES = new Set([
   "image/heic",
   "image/heif",
@@ -79,7 +79,7 @@ function sanitizeFileName(fileName: string) {
     .slice(0, 120);
 }
 
-function isHeicUpload(file: UploadFile, originalName: string, buffer: Buffer) {
+function isHeicUpload(file: Pick<UploadFile, "type">, originalName: string, buffer: Buffer) {
   const mimeType = file.type.toLowerCase();
   const extension = path.extname(originalName).toLowerCase();
 
@@ -112,15 +112,16 @@ function toJpegFileName(fileName: string) {
   return `${baseName}.jpg`;
 }
 
-function buildStoragePath(rootFolder: string, projectId: string, fileName: string) {
+function buildStoragePath(rootFolder: string, projectId: string, fileName: string, publicationId?: string) {
   const safeName = sanitizeFileName(fileName) || "upload";
-  const storedName = `${randomUUID()}-${safeName}`;
+  if (publicationId && !/^[a-zA-Z0-9_-]{1,128}$/.test(publicationId)) throw new Error("Gecersiz dosya islem kimligi.");
+  const storedName = `${publicationId ?? randomUUID()}-${safeName}`;
 
   return path.join(rootFolder, projectId, storedName).replace(/\\/g, "/");
 }
 
-export function buildProjectStoragePath(projectId: string, fileName: string) {
-  return buildStoragePath("projects", projectId, fileName);
+export function buildProjectStoragePath(projectId: string, fileName: string, publicationId?: string) {
+  return buildStoragePath("projects", projectId, fileName, publicationId);
 }
 
 export function buildProjectThumbnailStoragePath(projectId: string, fileName: string) {
@@ -134,7 +135,7 @@ function buildPendingHeicStoragePath(projectId: string, fileName: string) {
   return buildStoragePath("pending-heic/projects", projectId, fileName);
 }
 
-export async function convertHeicToJpeg(buffer: Buffer) {
+export async function convertHeicToJpeg(buffer: Buffer, timeoutMs = 90_000) {
   return new Promise<Buffer>((resolve, reject) => {
     const worker = new Worker(
       `
@@ -163,7 +164,14 @@ export async function convertHeicToJpeg(buffer: Buffer) {
       },
     );
 
+    const timer = setTimeout(() => {
+      void worker.terminate();
+      reject(new Error("HEIC donusturme suresi asildi."));
+    }, timeoutMs);
+    timer.unref();
+
     worker.once("message", (message: Buffer | Uint8Array | { error: string }) => {
+      clearTimeout(timer);
       if (message && typeof message === "object" && "error" in message) {
         reject(new Error(message.error));
         return;
@@ -172,13 +180,68 @@ export async function convertHeicToJpeg(buffer: Buffer) {
       resolve(Buffer.from(message));
     });
 
-    worker.once("error", reject);
+    worker.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
     worker.once("exit", (code) => {
+      clearTimeout(timer);
       if (code !== 0) {
         reject(new Error("HEIC donusturme islemi tamamlanamadi."));
       }
     });
   });
+}
+
+/** Register a received staging file without loading a complete video into RAM. */
+export async function prepareStoredProjectUpload(
+  file: { name: string; type: string; size: number },
+  projectId: string,
+  sourceStoragePath: string,
+  publicationId?: string,
+): Promise<ProjectUploadResult> {
+  if (file.size <= 0 || file.size > MAX_UPLOAD_BYTES) {
+    throw new Error("Dosya boyutu 100 MB limitini asamaz.");
+  }
+
+  const handle = await open(resolveStoragePath(sourceStoragePath), "r");
+  let header: Buffer;
+  try {
+    const info = await handle.stat();
+    if (info.size !== file.size) {
+      throw new Error("Dosya aktarimi tamamlanmadi.");
+    }
+    const bytes = Buffer.alloc(32);
+    const read = await handle.read(bytes, 0, bytes.length, 0);
+    header = bytes.subarray(0, read.bytesRead);
+  } finally {
+    await handle.close();
+  }
+
+  if (isHeicUpload(file, file.name, header)) {
+    return {
+      status: "pending-heic",
+      originalName: file.name,
+      targetName: toJpegFileName(file.name),
+      sizeBytes: BigInt(file.size),
+      tempStoragePath: sourceStoragePath,
+      targetStoragePath: buildProjectStoragePath(projectId, toJpegFileName(file.name), publicationId),
+    };
+  }
+
+  // A transaction retry reuses the same destination rather than leaving a new
+  // complete video copy on disk after every failed publication attempt.
+  const storagePath = buildProjectStoragePath(projectId, file.name, publicationId);
+  const absolutePath = resolveStoragePath(storagePath);
+  await mkdir(path.dirname(absolutePath), { recursive: true });
+  await copyFile(resolveStoragePath(sourceStoragePath), absolutePath);
+  return {
+    status: "ready",
+    originalName: file.name,
+    mimeType: file.type || "application/octet-stream",
+    sizeBytes: BigInt(file.size),
+    storagePath,
+  };
 }
 
 export async function writeStorageBuffer(storagePath: string, buffer: Buffer) {
@@ -212,7 +275,7 @@ export async function saveProjectUpload(file: UploadFile, projectId: string): Pr
     throw new Error("Dosya boyutu 100 MB limitini asamaz.");
   }
 
-  let originalName = file.name || "upload";
+  const originalName = file.name || "upload";
   const fileBuffer: Buffer<ArrayBufferLike> = Buffer.from(await file.arrayBuffer());
 
   if (isHeicUpload(file, originalName, fileBuffer)) {
