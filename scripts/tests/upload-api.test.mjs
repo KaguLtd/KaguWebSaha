@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { getTodayDateOnly } from '../../lib/dates/today.ts';
 
 // Real route handlers run against an isolated in-memory DB and real temporary files.
 // No production Prisma client, auth cookie, or upload directory is used.
@@ -20,9 +21,13 @@ function sessionMatches(session, where) {
 }
 const db = {
   project: { findUnique: async () => ({ id: 'project-A', isActive: true }) },
-  dailyTask: { findFirst: async ({ where }) => where.assignees?.some.userId === 'person-A' ? { id: 'task-A' } : null },
+  dailyTask: { findFirst: async ({ where }) => where.assignees?.some.userId === 'person-A' ? { id: 'task-A', taskDate: getTodayDateOnly() } : null },
   projectVisit: { findFirst: async () => null },
   uploadSession: {
+    findUnique: async ({ where }) => {
+      const key = where.uploadedByUserId_clientUploadId;
+      return copy([...sessions.values()].find((row) => row.uploadedByUserId === key.uploadedByUserId && row.clientUploadId === key.clientUploadId));
+    },
     upsert: async ({ where, create }) => {
       const key = where.uploadedByUserId_clientUploadId;
       const existing = [...sessions.values()].find((row) => row.uploadedByUserId === key.uploadedByUserId && row.clientUploadId === key.clientUploadId);

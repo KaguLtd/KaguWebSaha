@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/prisma";
 import { getTodayDateOnly } from "@/lib/dates/today";
+import { canWriteTaskDay, DELAYED_TASK_WRITE_ERROR, taskAgeDays } from "@/lib/personnel/delayed-write-policy";
 import { MAX_UPLOAD_BYTES } from "@/lib/files/storage";
 import { UploadProtocolError, UPLOAD_SESSION_TTL_MS } from "./protocol";
 
@@ -24,16 +25,25 @@ export async function uploadUser(request?: Request): Promise<User> {
   return { id: user.id, role: user.role };
 }
 
-export async function requireUploadContext(user: User, context: UploadContext, client: Client = prisma) {
+export async function requireUploadContext(user: User, context: UploadContext, client: Client = prisma, options: { completedAcknowledgement?: boolean } = {}) {
   const project = await client.project.findUnique({ where: { id: context.projectId }, select: { id: true, isActive: true } });
   if (!project) throw new UploadProtocolError("Proje bulunamadi.", 404);
   if (user.role === "OBSERVER" && !project.isActive) throw new UploadProtocolError("Arsiv projeye dosya ekleyemezsiniz.", 403);
   if (user.role === "PERSONNEL") {
     if (!context.dailyTaskId || context.projectVisitId) throw new UploadProtocolError("Personel gorev bilgisi gerekli.", 403);
+    const today = getTodayDateOnly();
     const task = await client.dailyTask.findFirst({ where: {
-      id: context.dailyTaskId, projectId: context.projectId, taskDate: { lte: getTodayDateOnly() }, assignees: { some: { userId: user.id } },
-    }, select: { id: true } });
+      id: context.dailyTaskId, projectId: context.projectId, taskDate: { lte: today }, assignees: { some: { userId: user.id } },
+    }, select: { id: true, taskDate: true } });
     if (!task) throw new UploadProtocolError("Bu goreve dosya ekleme yetkiniz yok.", 403);
+    const age = taskAgeDays(task.taskDate, today);
+    if (age === null || age < 0) throw new UploadProtocolError("Görev günü geçersiz veya gelecekte.", 403);
+    if (age > 0 && !project.isActive) throw new UploadProtocolError("Arşiv projeye geçmiş görev dosyası eklenemez.", 403);
+    // A committed result can still acknowledge a lost response after day seven.
+    // It never grants permission for another chunk or a new publication.
+    if (!options.completedAcknowledgement && !canWriteTaskDay(task.taskDate, today)) {
+      throw new UploadProtocolError(DELAYED_TASK_WRITE_ERROR, 403);
+    }
   } else if (context.dailyTaskId) {
     const task = await client.dailyTask.findFirst({ where: { id: context.dailyTaskId, projectId: context.projectId }, select: { id: true } });
     if (!task || user.role !== "ADMIN") throw new UploadProtocolError("Bu goreve dosya ekleme yetkiniz yok.", 403);
@@ -50,14 +60,14 @@ export async function requireUploadContext(user: User, context: UploadContext, c
 export function uploadStatus(session: UploadSession) {
   return { ok: true, uploadId: session.id, status: session.status,
     offsetBytes: Number(session.offsetBytes), sizeBytes: Number(session.sizeBytes),
-    projectFileId: session.projectFileId, expiresAt: session.expiresAt.toISOString(),
+    projectFileId: session.projectFileId, expiresAt: session.expiresAt.toISOString(), completedAt: session.completedAt?.toISOString() ?? null,
     processing: session.status === "COMPLETED" && !session.projectFileId };
 }
 
 export async function ownedUpload(uploadId: string, user: User, client: Client = prisma) {
   const session = await client.uploadSession.findFirst({ where: { id: uploadId, uploadedByUserId: user.id } });
   if (!session) throw new UploadProtocolError("Yukleme bulunamadi.", 404);
-  await requireUploadContext(user, session, client);
+  await requireUploadContext(user, session, client, { completedAcknowledgement: session.status === "COMPLETED" });
   return session;
 }
 

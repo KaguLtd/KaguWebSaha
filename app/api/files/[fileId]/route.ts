@@ -4,9 +4,8 @@ import { Readable } from "node:stream";
 import path from "path";
 import { NextResponse } from "next/server";
 
-import { requireUser } from "@/lib/auth/session";
-import { getTodayDateOnly } from "@/lib/dates/today";
-import { prisma } from "@/lib/db/prisma";
+import { getCurrentUser } from "@/lib/auth/session";
+import { canReadProjectFile, readProjectFileForAccess } from "@/lib/files/access";
 import { resolveStoragePath } from "@/lib/files/storage";
 import { parseByteRange } from "@/lib/files/http-range";
 
@@ -22,43 +21,17 @@ async function serveFile(
     }>;
   },
 ) {
-  const user = await requireUser();
+  const user = await getCurrentUser();
+  if (!user) return NextResponse.json({ ok: false, error: "Oturum süresi doldu. Tekrar giriş yapın." }, { status: 401 });
 
   const { fileId } = await params;
-  const file = await prisma.projectFile.findUnique({
-    where: {
-      id: fileId,
-    },
-    include: {
-      project: {
-        include: {
-          dailyTasks: {
-            where: {
-              taskDate: getTodayDateOnly(),
-              assignees: {
-                some: {
-                  userId: user.id,
-                },
-              },
-            },
-            select: {
-              id: true,
-            },
-            take: 1,
-          },
-        },
-      },
-    },
-  });
+  const file = await readProjectFileForAccess(fileId, user);
 
   if (!file) {
     return NextResponse.json({ error: "Dosya bulunamadi." }, { status: 404 });
   }
 
-  const canAccess =
-    user.role === "ADMIN" ||
-    (user.role === "OBSERVER" && file.project.isActive) ||
-    (user.role === "PERSONNEL" && file.project.dailyTasks.length > 0);
+  const canAccess = canReadProjectFile(user, file);
 
   if (!canAccess) {
     return NextResponse.json({ error: "Yetkisiz dosya erisimi." }, { status: 403 });

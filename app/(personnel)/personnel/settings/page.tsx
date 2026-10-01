@@ -4,6 +4,7 @@ import { changePasswordAction } from "./actions";
 import { LocationTestButton } from "@/components/personnel/location-fields";
 import { Button } from "@/components/ui/button";
 import { OfflineQueueManager } from "@/components/personnel/offline-queue-manager";
+import { RecentUploadResults } from "@/components/personnel/recent-upload-results";
 import { requireRole } from "@/lib/auth/session";
 
 export default async function PersonnelSettingsPage() {
@@ -39,6 +40,7 @@ export default async function PersonnelSettingsPage() {
         </section>
 
         <OfflineQueueManager kind="PERSONNEL" userId={user.id} />
+        <RecentUploadResults userId={user.id} />
 
         <form action={logoutAction}>
           <Button className="w-full" type="submit" variant="outline">

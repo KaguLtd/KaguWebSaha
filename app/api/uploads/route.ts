@@ -14,10 +14,16 @@ export async function POST(request: Request) {
       throw new UploadProtocolError("Bu taslak baska bir kullaniciya ait. Ilgili hesaba giris yapin.", 401);
     }
     const metadata = readUploadMetadata(payload);
-    await requireUploadContext(user, metadata);
+    const identity = { uploadedByUserId: user.id, clientUploadId: metadata.clientUploadId };
+    const previous = await prisma.uploadSession.findUnique({ where: { uploadedByUserId_clientUploadId: identity } });
+    const metadataMatches = (session: typeof previous) => session !== null &&
+      ["projectId", "dailyTaskId", "projectVisitId", "originalName", "mimeType", "sizeBytes", "note"].every((key) => session[key as keyof typeof metadata] === metadata[key as keyof typeof metadata]);
+    if (previous && !metadataMatches(previous)) throw new UploadProtocolError("Ayni yukleme kimligi farkli bir dosyada kullanilamaz.", 409);
+    await requireUploadContext(user, metadata, prisma, { completedAcknowledgement: previous?.status === "COMPLETED" });
+    if (previous?.status === "COMPLETED") return NextResponse.json(uploadStatus(previous));
     const id = randomUUID();
     const session = await prisma.uploadSession.upsert({
-      where: { uploadedByUserId_clientUploadId: { uploadedByUserId: user.id, clientUploadId: metadata.clientUploadId } },
+      where: { uploadedByUserId_clientUploadId: identity },
       create: { id, uploadedByUserId: user.id, ...metadata, tempStoragePath: `pending-uploads/${id}.bin`, expiresAt: renewedUploadExpiry() },
       update: {},
     });

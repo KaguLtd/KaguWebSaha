@@ -9,6 +9,7 @@ import { parseLatitude, parseLongitude } from "@/lib/location/google-maps";
 import { runOfflineOperation } from "@/lib/offline/server-operation";
 import { InputError } from "@/lib/offline/input-error";
 import { eventOccurredAt } from "@/lib/personnel/event-policy";
+import { canWriteTaskDay, DELAYED_TASK_WRITE_ERROR } from "@/lib/personnel/delayed-write-policy";
 
 type Payload = FormData | Record<string, unknown>;
 type EventType = "ARRIVED_SITE" | "LEFT_SITE" | "NOTE";
@@ -60,6 +61,7 @@ export async function POST(request: Request) {
         throw new InputError("Geçmiş saha olayı otomatik uygulanamadı. Kayıt cihazda korundu; yönetici kontrolü gerekiyor.");
       }
       if (type === "NOTE") {
+        if (!canWriteTaskDay(task.taskDate, today)) throw new InputError(DELAYED_TASK_WRITE_ERROR);
         await tx.taskEvent.create({ data: { dailyTaskId: task.id, projectId: task.projectId, userId: user.id, type: "NOTE_ADDED", note, createdAt: occurredAt } });
         await tx.projectNote.create({ data: { projectId: task.projectId, userId: user.id, note, createdAt: occurredAt } });
         await tx.projectTimelineEvent.create({ data: { projectId: task.projectId, dailyTaskId: task.id, userId: user.id, eventType: "NOTE_ADDED", title: "Personel not ekledi", description: note, createdAt: occurredAt } });

@@ -5,13 +5,15 @@ import { useRouter } from "next/navigation";
 import { Camera, ClipboardPenLine, MapPinCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { NoteDraftRecovery } from "@/components/admin/note-draft-recovery";
 import { isCompressibleImage } from "@/lib/client/image-compression";
 import {
   enqueueVisitUploads,
   listOfflineItems,
   syncOfflineItems,
 } from "@/lib/offline/queue";
-import { createClientId } from "@/lib/offline/client-id";
+import { requestJson } from "@/lib/client/json-request";
+import { useNoteDraft } from "@/lib/client/use-note-draft";
 import { getVisitDayKey } from "@/lib/visits/status";
 
 type VisitInteractionPanelProps = {
@@ -22,8 +24,7 @@ type VisitInteractionPanelProps = {
 };
 
 type VisitResponse = {
-  error?: string;
-  ok?: boolean;
+  ok: true;
   visitId?: string | null;
 };
 
@@ -43,8 +44,9 @@ export function VisitInteractionPanel({
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [visitConfirmation, setVisitConfirmation] = useState<"idle" | "confirm">("idle");
   const router = useRouter();
-  const visitClientId = useRef("");
-  const noteRequest = useRef<{ id: string; note: string; visitId: string } | null>(null);
+  const visitDraft = useNoteDraft(userId, projectId, "visit");
+  const noteDraft = useNoteDraft(userId, projectId, "note");
+  const fileDraft = useNoteDraft(userId, projectId, "files");
   const submitting = useRef(false);
   const uploading = useRef(false);
   const shownDay = useRef(currentDay);
@@ -61,7 +63,6 @@ export function VisitInteractionPanel({
       shownDay.current = nextDay;
       setActiveVisitId("");
       setVisitConfirmation("idle");
-      visitClientId.current = "";
       router.refresh();
     }
     const timer = window.setInterval(checkDay, 30_000);
@@ -119,11 +120,13 @@ export function VisitInteractionPanel({
 
     try {
       formData.set("projectId", projectId);
-      if (formData.get("operation") === "visit") {
-        visitClientId.current ||= createClientId();
-        formData.set("clientItemId", visitClientId.current);
-      }
-      if (getVisitDayKey() !== shownDay.current) {
+      formData.set("ownerUserId", userId);
+      const isVisit = formData.get("operation") === "visit";
+      const draft = isVisit ? visitDraft : noteDraft;
+      const submission = draft.capture(isVisit ? currentDay : activeVisitId);
+      formData.set("note", submission.value);
+      formData.set("clientItemId", submission.clientItemId);
+      if (getVisitDayKey() !== currentDay) {
         setActiveVisitId("");
         router.refresh();
         throw new Error("Gün değişti. Ziyaret bilgisi yenileniyor; notunuz korundu, tekrar kaydedin.");
@@ -132,35 +135,23 @@ export function VisitInteractionPanel({
       if (activeVisitId && !formData.has("projectVisitId")) {
         formData.set("projectVisitId", activeVisitId);
       }
-      if (formData.get("operation") === "note") {
-        const note = String(formData.get("note") ?? "").trim();
-        const visitId = String(formData.get("projectVisitId") ?? "");
-        if (!noteRequest.current || noteRequest.current.note !== note || noteRequest.current.visitId !== visitId) {
-          noteRequest.current = { id: createClientId(), note, visitId };
-        }
-        formData.set("clientItemId", noteRequest.current.id);
-      }
-
       if (withLocation) {
         await appendCurrentLocation(formData);
       }
 
-      const response = await fetch("/api/admin/visits", {
+      const payload = await requestJson<VisitResponse>("/api/admin/visits", {
         body: formData,
         method: "POST",
+        redirect: "error",
       });
-      const payload = (await response.json().catch(() => ({}))) as VisitResponse;
-
-      if (!response.ok) {
-        throw new Error(payload.error || "Islem kaydedilemedi.");
-      }
+      if (isVisit && (typeof payload.visitId !== "string" || !payload.visitId.trim())) throw new Error("Ziyaret kaydı doğrulanamadı. Notunuz korundu; tekrar deneyin.");
 
       if (payload.visitId) {
         setActiveVisitId(payload.visitId);
       }
 
-      setMessage(successMessage);
-      if (formData.get("operation") === "note") noteRequest.current = null;
+      const cleared = draft.acknowledge(submission);
+      setMessage(cleared ? successMessage : `${successMessage} Yeni düzenlemeniz taslakta korunuyor.`);
       router.refresh();
       return true;
     } catch (submitError) {
@@ -175,7 +166,7 @@ export function VisitInteractionPanel({
   }
 
   async function submitFiles(form: HTMLFormElement) {
-    if (uploading.current) return;
+    if (uploading.current || !fileDraft.ready) return;
     uploading.current = true;
     setIsUploading(true);
     setMessage("");
@@ -184,6 +175,7 @@ export function VisitInteractionPanel({
 
     const formData = new FormData(form);
     const note = String(formData.get("note") ?? "").trim();
+    const submission = fileDraft.capture(activeVisitId);
     const files = formData
       .getAll("files")
       .filter((value): value is File => value instanceof File && value.size > 0);
@@ -205,7 +197,9 @@ export function VisitInteractionPanel({
         note: note || undefined,
         files,
       });
-      form.reset();
+      const input = form.elements.namedItem("files");
+      if (input instanceof HTMLInputElement) input.value = "";
+      fileDraft.acknowledge(submission);
       setPendingUploads((current) => current + queuedItems.length);
     } catch {
       setError(
@@ -309,10 +303,15 @@ export function VisitInteractionPanel({
           <textarea
             className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-navy shadow-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary"
             id="visit-note"
+            disabled={!visitDraft.ready || isPending}
+            maxLength={20000}
             name="note"
             placeholder="Istege bagli kisa ziyaret notu"
             rows={3}
+            value={visitDraft.value}
+            onChange={(event) => visitDraft.setValue(event.target.value)}
           />
+          <NoteDraftRecovery drafts={visitDraft.previousDrafts} restore={visitDraft.restoreDraft} disabled={isPending} />
           <button
             className={`mx-auto flex h-44 w-44 items-center justify-center rounded-full px-6 text-center text-xl font-semibold leading-tight text-white shadow-lg transition focus:outline-none focus:ring-4 disabled:cursor-not-allowed disabled:bg-slate-400 disabled:text-white disabled:shadow-none md:h-12 md:w-full md:rounded-md md:text-base ${
               activeVisitId
@@ -321,7 +320,7 @@ export function VisitInteractionPanel({
                   ? "bg-amber-500 hover:bg-amber-600 focus:ring-amber-200"
                   : "bg-emerald-600 hover:bg-emerald-700 focus:ring-emerald-200"
             }`}
-            disabled={isPending || Boolean(activeVisitId)}
+            disabled={isPending || !visitDraft.ready || Boolean(activeVisitId)}
             type="submit"
           >
             <MapPinCheck className="h-4 w-4" aria-hidden="true" />
@@ -343,7 +342,7 @@ export function VisitInteractionPanel({
               const form = event.currentTarget;
               const formData = new FormData(form);
               formData.set("operation", "note");
-              if (await submit(formData, "Not eklendi.")) form.reset();
+              await submit(formData, "Not eklendi.");
             }}
           >
             <label className="flex items-center gap-2 text-sm font-medium text-navy" htmlFor="note">
@@ -353,11 +352,16 @@ export function VisitInteractionPanel({
             <textarea
               className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-navy shadow-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary"
               id="note"
+              disabled={!noteDraft.ready}
+              maxLength={20000}
               name="note"
               required
               rows={4}
+              value={noteDraft.value}
+              onChange={(event) => noteDraft.setValue(event.target.value)}
             />
-            <Button disabled={isPending} type="submit" variant="outline">
+            <NoteDraftRecovery drafts={noteDraft.previousDrafts} restore={noteDraft.restoreDraft} disabled={isPending} />
+            <Button disabled={isPending || !noteDraft.ready} type="submit" variant="outline">
               Kaydet
             </Button>
           </form>
@@ -376,6 +380,7 @@ export function VisitInteractionPanel({
             <input
               className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-navy shadow-sm file:mr-3 file:rounded-md file:border file:border-primary/20 file:bg-primary/10 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary"
               id="files"
+              disabled={isUploading || !fileDraft.ready}
               multiple
               name="files"
               required
@@ -384,10 +389,15 @@ export function VisitInteractionPanel({
             <textarea
               className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-navy shadow-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary"
               name="note"
+              disabled={!fileDraft.ready}
+              maxLength={20000}
               placeholder="Dosya notu, istege bagli"
               rows={2}
+              value={fileDraft.value}
+              onChange={(event) => fileDraft.setValue(event.target.value)}
             />
-            <Button disabled={isUploading} type="submit" variant="outline">
+            <NoteDraftRecovery drafts={fileDraft.previousDrafts} restore={fileDraft.restoreDraft} disabled={isUploading} />
+            <Button disabled={isUploading || !fileDraft.ready} type="submit" variant="outline">
               Yukle
             </Button>
           </form>
@@ -428,6 +438,9 @@ export function VisitInteractionPanel({
           <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
             {message}
           </p>
+        ) : null}
+        {[visitDraft.persistenceError, noteDraft.persistenceError, fileDraft.persistenceError].find(Boolean) ? (
+          <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">{[visitDraft.persistenceError, noteDraft.persistenceError, fileDraft.persistenceError].find(Boolean)}</p>
         ) : null}
         {error ? (
           <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">

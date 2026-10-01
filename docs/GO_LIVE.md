@@ -1,6 +1,6 @@
 # Kagu Saha Go-Live Checklist
 
-Use this checklist after manual acceptance testing passes and before the app is used with real production data.
+**First installation only.** Use this checklist on a new empty database or an explicitly disposable acceptance environment. For an existing active installation, follow [V1.1 upgrade notes](V1_1_UYGULAMA_VE_YAYIN.md) and [CI/operations](CI_VE_OPERASYON.md); never use reset or bootstrap as an update step.
 
 This document is intentionally operational and conservative. Do not reset the database or clear uploads until you have confirmed that test data should not be kept.
 
@@ -11,7 +11,7 @@ Choose one path before touching the database:
 - Keep test data: do not reset the database; manually archive or ignore test projects/users if they are harmless.
 - Start clean: reset the test database and clear test uploads before creating real users and projects.
 
-For real use, the recommended path is to start clean unless acceptance test records were intentionally created as real records.
+Preserve existing records by default. A clean start requires an explicit decision that this particular test database and its uploads are disposable.
 
 ## 2. Back Up Before Reset
 
@@ -33,16 +33,18 @@ Only use this path when the database can be safely wiped.
 3. Run:
 
 ```bash
-npx prisma generate
-npx prisma validate
-npx prisma migrate deploy
-npm run deploy:preflight
-npm run admin:bootstrap
+node --env-file=/etc/kagu-saha/runtime.env node_modules/prisma/build/index.js generate
+node --env-file=/etc/kagu-saha/runtime.env node_modules/prisma/build/index.js validate
+node --env-file=/etc/kagu-saha/runtime.env node_modules/prisma/build/index.js migrate deploy
 npm run build
+npm run deploy:preflight -- --mode=bootstrap --env-file=/etc/kagu-saha/bootstrap.env --worker-env-file=/etc/kagu-saha/runtime.env
+node --env-file=/etc/kagu-saha/runtime.env --env-file=/etc/kagu-saha/bootstrap.env scripts/admin-bootstrap.mjs
 ```
 
-4. Start the app with the chosen production process manager.
-5. Open `/api/health` and confirm it returns `ok: true`.
+The private bootstrap environment must include runtime values plus the first-admin variables. Prepare Node 24.15.0, install all build dependencies with `npm ci`, and use the absolute/shared storage and environment examples in the operations guide. Remove first-admin credentials from routine service configuration after setup.
+
+4. Start the independent media worker and web application with the chosen process manager. Both read the same runtime environment; web uses `MEDIA_WORKER_MODE=external`.
+5. Open `/api/health`, then run `deploy:preflight -- --mode=upgrade --env-file=/etc/kagu-saha/runtime.env --worker-env-file=/etc/kagu-saha/runtime.env --check-worker`. A web `ok: true` alone does not verify the worker, database or storage.
 6. Login with the real admin account.
 
 ## 4. Upload Folder Reset
@@ -67,15 +69,16 @@ ADMIN_USERNAME
 ADMIN_PASSWORD
 ADMIN_FULL_NAME
 DATABASE_URL
-SESSION_SECRET
 APP_ORIGIN
 UPLOAD_DIR
+MEDIA_WORKER_MODE
+MEDIA_WORKER_HEARTBEAT_FILE
 ```
 
 Then run:
 
 ```bash
-npm run admin:bootstrap
+node --env-file=/etc/kagu-saha/runtime.env --env-file=/etc/kagu-saha/bootstrap.env scripts/admin-bootstrap.mjs
 ```
 
 The command may print the admin username. It must not print the password.
@@ -98,9 +101,8 @@ After login:
 Run this quick check after the app starts in the target environment:
 
 ```bash
-npx prisma validate
-npm run deploy:preflight
-npm run build
+node --env-file=/etc/kagu-saha/runtime.env node_modules/prisma/build/index.js validate
+npm run deploy:preflight -- --mode=upgrade --env-file=/etc/kagu-saha/runtime.env --worker-env-file=/etc/kagu-saha/runtime.env --check-worker
 ```
 
 Then verify in the browser:
@@ -119,6 +121,7 @@ Then verify in the browser:
 Do not start active use if any of these are true:
 
 - Health check fails.
+- Worker heartbeat or successful batch is stale, its process does not restart, or pending jobs stop progressing.
 - `deploy:preflight` cannot write to `UPLOAD_DIR`.
 - `prisma migrate deploy` fails.
 - Admin bootstrap fails.

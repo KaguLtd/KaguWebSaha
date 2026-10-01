@@ -93,3 +93,17 @@ test('personnel replay commits once, retains failed transactions and never reope
   assert.equal((await send('ARRIVED_SITE', 'past-arrival', { occurredAt: '2026-09-29T09:00:00Z' })).status, 200);
   assert.equal(state.tasks.get(task.id).status, 'COMPLETED');
 });
+
+test('past notes allow task day7, retain day8 failures and replay an already saved receipt after the cutoff', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-01T10:00:00Z') });
+  const task = { id: 'past-note-task', projectId: 'project-A', taskDate: new Date('2026-09-24T00:00:00Z'), status: 'COMPLETED', assignees: [{ userId: 'person-A' }] };
+  state.tasks.set(task.id, task);
+  const send = (id) => POST(new Request('http://test/api/offline/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ownerUserId: 'person-A', type: 'NOTE', taskId: task.id, clientItemId: id, note: 'Gecikmiş not', occurredAt: '2026-09-24T09:00:00Z' }) }));
+  const before = state.notes.length;
+  assert.equal((await send('day7-note-001')).status, 200); assert.equal(state.notes.length, before + 1);
+  t.mock.timers.setTime(new Date('2026-10-02T10:00:00Z').getTime());
+  assert.equal((await send('day8-note-001')).status, 400); assert.equal(state.notes.length, before + 1);
+  assert.equal((await send('day7-note-001')).status, 200); assert.equal(state.notes.length, before + 1);
+  assert.equal(state.receipts.has('person-A:day8-note-001'), false);
+});

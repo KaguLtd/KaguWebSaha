@@ -15,6 +15,7 @@ async function newTab() {
 const owner = 'person-a';
 const video = (bytes = 32) => new File([new Uint8Array(bytes)], 'saha.mp4', { type: 'video/mp4' });
 const ok = (body = {}) => Response.json({ ok: true, ...body });
+const finalized = (uploadId = 'upload', sizeBytes = 32, extra = {}) => ok({ uploadId, sizeBytes, offsetBytes: sizeBytes, status: 'COMPLETED', projectFileId: `file-${uploadId}`, ...extra });
 const deferred = () => { let resolve; const promise = new Promise((done) => { resolve = done; }); return { promise, resolve }; };
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -33,7 +34,7 @@ beforeEach(() => {
 
 async function storedItems(name = 'kagu-saha-offline-v11') {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(name, 1);
+    const request = indexedDB.open(name);
     request.onupgradeneeded = () => request.result.createObjectStore('pending-items', { keyPath: 'id' });
     request.onsuccess = () => {
       const database = request.result;
@@ -46,7 +47,7 @@ async function storedItems(name = 'kagu-saha-offline-v11') {
 }
 async function addLegacy(item, name = 'kagu-saha-offline-v11') {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(name, 1);
+    const request = indexedDB.open(name);
     request.onupgradeneeded = () => request.result.createObjectStore('pending-items', { keyPath: 'id' });
     request.onsuccess = () => {
       const database = request.result;
@@ -164,7 +165,7 @@ test('a blocked pass does not repeatedly wake sync; a cancelled server session r
   globalThis.fetch = async () => ok({ uploadId: 'expired', status: 'CANCELLED', sizeBytes: 32, offsetBytes: 0 });
   await queue.syncOfflineItems({ userId: owner, kinds: ['VISIT_UPLOAD'] });
   const [retained] = await queue.listOfflineItems(['VISIT_UPLOAD'], owner);
-  assert.equal(retained.status, 'PENDING'); assert.equal(retained.files[0].size, 32); assert.ok(retained.uploadGeneration);
+  assert.equal(retained.status, 'PENDING'); assert.equal(retained.files[0].size, 32); assert.ok(retained.uploadFileGenerations[0]);
 });
 
 test('file dependency waits for its note; another task note is not blocked by that failed note', async () => {
@@ -197,7 +198,7 @@ test('a newly saved note can sync while a previous video transfer is still waiti
     if (url === '/api/offline/sync') { notes.push(JSON.parse(options.body)); return ok(); }
     if (url === '/api/uploads') return ok({ uploadId: 'upload', offsetBytes: 0, sizeBytes: 32, status: 'OPEN' });
     if (options?.method === 'PATCH') { started.resolve(); await release.promise; return ok({ uploadId: 'upload', offsetBytes: 32, sizeBytes: 32, status: 'OPEN' }); }
-    if (url.endsWith('/finalize')) return ok();
+    if (url.endsWith('/finalize')) return finalized();
     throw new Error(`Unexpected URL ${url}`);
   };
   const mediaSync = queue.syncOfflineItems({ userId: owner, kinds: ['VISIT_UPLOAD', 'PERSONNEL'] });
@@ -219,10 +220,10 @@ test('two independent tabs use the durable claim so only one uploads the same qu
   const started = deferred();
   const release = deferred();
   let uploadInitializations = 0;
-  globalThis.fetch = async (url, options) => {
+  globalThis.fetch = async (url) => {
     if (url === '/api/uploads') { uploadInitializations++; started.resolve(); await release.promise; return ok({ uploadId: 'upload', offsetBytes: 32, sizeBytes: 32, status: 'OPEN' }); }
     assert.equal(url, '/api/uploads/upload/finalize');
-    return ok();
+    return finalized();
   };
   const firstSync = first.syncOfflineItems({ userId: owner, kinds: ['VISIT_UPLOAD'] });
   await started.promise;
@@ -243,6 +244,7 @@ test('a lost response after a committed chunk resumes from the server offset wit
   let loseResponse = true;
   let committedBeforeResume = 0;
   const sentOffsets = [];
+  const sentSizes = [];
   const clientIds = [];
   globalThis.fetch = async (url, options) => {
     if (url === '/api/uploads') {
@@ -253,19 +255,23 @@ test('a lost response after a committed chunk resumes from the server offset wit
       const sent = Number(options.headers['Upload-Offset']);
       assert.equal(sent, offset);
       sentOffsets.push(sent);
+      sentSizes.push(options.body.size);
       offset += options.body.size;
       if (loseResponse && sentOffsets.length === 2) { loseResponse = false; committedBeforeResume = offset; throw new TypeError('Network lost after commit'); }
       return ok({ uploadId: 'upload', offsetBytes: offset, sizeBytes: bytes, status: 'OPEN' });
     }
     assert.equal(url, '/api/uploads/upload/finalize');
-    return ok();
+    return finalized('upload', bytes);
   };
   const interrupted = await queue.syncOfflineItems({ userId: owner, kinds: ['VISIT_UPLOAD'] });
   assert.equal(interrupted.synced, 0);
-  assert.equal((await queue.listOfflineItems(['VISIT_UPLOAD'], owner)).length, 1);
-  const resumed = await queue.syncOfflineItems({ userId: owner, kinds: ['VISIT_UPLOAD'], force: true });
+  const [retained] = await queue.listOfflineItems(['VISIT_UPLOAD'], owner);
+  assert.equal(retained.chunkState.chunkBytes, 64 * 1024, 'the smaller retry size is durable');
+  const restartedTab = await newTab();
+  const resumed = await restartedTab.syncOfflineItems({ userId: owner, kinds: ['VISIT_UPLOAD'], force: true });
   assert.equal(resumed.synced, 1);
   assert.equal(sentOffsets[2], committedBeforeResume);
+  assert.equal(sentSizes[2], 64 * 1024, 'a new page retains the reduced size while resuming at the server ACK');
   assert.equal(new Set(sentOffsets).size, sentOffsets.length);
   assert.equal(offset, bytes);
   assert.equal(new Set(clientIds).size, 1);
@@ -320,7 +326,7 @@ test('reselecting a failed file keeps the draft identity but uses a fresh upload
       return ok({ uploadId: 'replacement', offsetBytes: input.sizeBytes, sizeBytes: input.sizeBytes, status: 'OPEN' });
     }
     assert.equal(url, '/api/uploads/replacement/finalize');
-    return ok();
+    return finalized('replacement', 64);
   };
   await queue.syncOfflineItems({ userId: owner, kinds: ['VISIT_UPLOAD'] });
   await assert.rejects(() => queue.replaceOfflineItemFiles(item.id, [video(64)], { userId: 'person-b', resetUpload: true }));
@@ -346,7 +352,7 @@ test('one rejected visit file does not block a second independently queued visit
       return ok({ uploadId: 'second-file', offsetBytes: 64, sizeBytes: 64, status: 'OPEN' });
     }
     assert.equal(url, '/api/uploads/second-file/finalize');
-    return ok();
+    return finalized('second-file', 64);
   };
   const result = await queue.syncOfflineItems({ userId: owner, kinds: ['VISIT_UPLOAD'] });
   assert.equal(result.synced, 1);
@@ -393,7 +399,7 @@ test('a second caller joining an active transfer receives subsequent upload prog
     if (url === '/api/uploads') return ok({ uploadId: 'upload', offsetBytes: 0, sizeBytes: 32, status: 'OPEN' });
     if (options?.method === 'PATCH') { started.resolve(); await release.promise; return ok({ uploadId: 'upload', offsetBytes: 32, sizeBytes: 32, status: 'OPEN' }); }
     assert.equal(url, '/api/uploads/upload/finalize');
-    return ok();
+    return finalized();
   };
   const firstSync = queue.syncOfflineItems({ userId: owner, kinds: ['VISIT_UPLOAD'], onProgress: (progress) => firstProgress.push(progress.progress) });
   await started.promise;
@@ -402,4 +408,224 @@ test('a second caller joining an active transfer receives subsequent upload prog
   await Promise.all([firstSync, secondSync]);
   assert.equal(firstProgress.includes(100), true);
   assert.equal(secondProgress.includes(100), true);
+});
+
+test('adaptive measurements include ACK body time, not just fast response headers', async () => {
+  const queue = await newTab();
+  const bytes = 3 * 128 * 1024;
+  const item = await queue.enqueueVisitUpload({ userId: owner, projectId: 'site', files: [video(bytes)] });
+  await queue.replaceOfflineItemFiles(item.id, [video(bytes)], { userId: owner });
+  const performanceDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'performance');
+  let clock = 0;
+  let offset = 0;
+  const chunks = [];
+  Object.defineProperty(globalThis, 'performance', { configurable: true, value: { now: () => clock } });
+  globalThis.fetch = async (url, options) => {
+    if (url === '/api/uploads') return ok({ uploadId: 'body-timing', sizeBytes: bytes, offsetBytes: offset, status: 'OPEN' });
+    if (options?.method === 'PATCH') {
+      chunks.push(options.body.size);
+      offset += options.body.size;
+      return { ok: true, status: 200, redirected: false, async json() {
+        clock += 40_000;
+        return { ok: true, uploadId: 'body-timing', sizeBytes: bytes, offsetBytes: offset, status: 'OPEN' };
+      } };
+    }
+    assert.equal(url, '/api/uploads/body-timing/finalize');
+    return finalized('body-timing', bytes);
+  };
+  try {
+    assert.equal((await queue.syncOfflineItems({ userId: owner, kinds: ['VISIT_UPLOAD'] })).synced, 1);
+    assert.deepEqual(chunks, [128, 64, 64, 64, 64].map((value) => value * 1024));
+  } finally { Object.defineProperty(globalThis, 'performance', performanceDescriptor); }
+});
+
+test('an expired session at PATCH retains confirmed bytes and resumes after login with the same upload identity', async () => {
+  const queue = await newTab();
+  const bytes = 3 * 128 * 1024;
+  const item = await queue.enqueueVisitUpload({ userId: owner, projectId: 'site', files: [video(bytes)] });
+  await queue.replaceOfflineItemFiles(item.id, [video(bytes)], { userId: owner });
+  let offset = 0;
+  let expired = true;
+  const identities = [];
+  const sentOffsets = [];
+  globalThis.fetch = async (url, options) => {
+    if (url === '/api/uploads') {
+      identities.push(JSON.parse(options.body).clientUploadId);
+      return ok({ uploadId: 'auth-retry', sizeBytes: bytes, offsetBytes: offset, status: 'OPEN' });
+    }
+    if (options?.method === 'PATCH') {
+      sentOffsets.push(Number(options.headers['Upload-Offset']));
+      if (expired && offset > 0) return Response.json({ ok: false }, { status: 401 });
+      offset += options.body.size;
+      return ok({ uploadId: 'auth-retry', sizeBytes: bytes, offsetBytes: offset, status: 'OPEN' });
+    }
+    return finalized('auth-retry', bytes);
+  };
+  await queue.syncOfflineItems({ userId: owner, kinds: ['VISIT_UPLOAD'] });
+  const confirmed = offset;
+  const [pending] = await queue.listOfflineItems(['VISIT_UPLOAD'], owner);
+  assert.equal(pending.status, 'PENDING'); assert.equal(pending.files[0].size, bytes);
+  assert.equal((await queue.listSuccessfulUploads(owner)).length, 0);
+  expired = false;
+  assert.equal((await queue.syncOfflineItems({ userId: owner, kinds: ['VISIT_UPLOAD'], force: true })).synced, 1);
+  assert.equal(sentOffsets[2], confirmed);
+  assert.equal(new Set(identities).size, 1);
+  assert.equal((await queue.listSuccessfulUploads(owner)).length, 1);
+});
+
+test('an incomplete or malformed finalize ACK retains the Blob and creates no delivery receipt', async () => {
+  for (const badAck of [{ ok: true }, { ok: true, uploadId: 'bad-final', status: 'OPEN', sizeBytes: 32, offsetBytes: 32, projectFileId: 'file' }]) {
+    const queue = await newTab();
+    const item = await queue.enqueueVisitUpload({ userId: owner, projectId: 'site', files: [video()] });
+    await queue.replaceOfflineItemFiles(item.id, [video()], { userId: owner });
+    globalThis.fetch = async (url) => url === '/api/uploads'
+      ? ok({ uploadId: 'bad-final', sizeBytes: 32, offsetBytes: 32, status: 'OPEN' }) : Response.json(badAck);
+    assert.equal((await queue.syncOfflineItems({ userId: owner, kinds: ['VISIT_UPLOAD'], force: true })).synced, 0);
+    assert.equal((await queue.listOfflineItems(['VISIT_UPLOAD'], owner)).find((row) => row.id === item.id).files[0].size, 32);
+    assert.deepEqual(await queue.listSuccessfulUploads(owner), []);
+    await queue.deleteOfflineItem(item.id, owner);
+  }
+});
+
+test('a receipt transaction abort after successful finalize preserves the Blob; retry stores one owner-scoped receipt', async () => {
+  const queue = await newTab();
+  const item = await queue.enqueueVisitUpload({ userId: owner, projectId: 'site', note: 'Private note must not enter receipt', files: [video()] });
+  await queue.replaceOfflineItemFiles(item.id, [video()], { userId: owner });
+  globalThis.fetch = async (url) => url === '/api/uploads'
+    ? ok({ uploadId: 'receipt-retry', sizeBytes: 32, offsetBytes: 32, status: 'COMPLETED' }) : finalized('receipt-retry', 32);
+  const factory = indexedDB;
+  let abortNextReceipt = true;
+  globalThis.indexedDB = { open(...args) {
+    const request = factory.open(...args);
+    request.addEventListener('success', () => {
+      const database = request.result;
+      const transaction = database.transaction.bind(database);
+      database.transaction = (...transactionArgs) => {
+        const tx = transaction(...transactionArgs);
+        if (transactionArgs[0] === 'successful-uploads' && transactionArgs[1] === 'readwrite' && abortNextReceipt) {
+          abortNextReceipt = false;
+          const store = tx.objectStore('successful-uploads');
+          const put = store.put.bind(store);
+          store.put = (...putArgs) => { const write = put(...putArgs); write.addEventListener('success', () => tx.abort(), { once: true }); return write; };
+        }
+        return tx;
+      };
+    });
+    return request;
+  } };
+  assert.equal((await queue.syncOfflineItems({ userId: owner, kinds: ['VISIT_UPLOAD'] })).synced, 0);
+  globalThis.indexedDB = factory;
+  assert.equal((await queue.listOfflineItems(['VISIT_UPLOAD'], owner))[0].files[0].size, 32);
+  assert.deepEqual(await queue.listSuccessfulUploads(owner), []);
+  assert.equal((await queue.syncOfflineItems({ userId: owner, kinds: ['VISIT_UPLOAD'], force: true })).synced, 1);
+  const [receipt] = await (await newTab()).listSuccessfulUploads(owner);
+  assert.deepEqual(Object.keys(receipt).sort(), ['completedAt', 'id', 'originalName', 'projectFileId', 'uploadId', 'uploadedByUserId'].sort());
+  assert.equal(receipt.originalName, 'saha.mp4'); assert.equal(receipt.projectFileId, 'file-receipt-retry');
+  assert.deepEqual(await queue.listSuccessfulUploads('person-b'), []);
+  assert.deepEqual(await queue.listOfflineItems(['VISIT_UPLOAD'], owner), []);
+});
+
+test('HEIC accepted transfers retain a receipt until the owner-scoped status resolves its eventual file', async () => {
+  const queue = await newTab();
+  const item = await queue.enqueueVisitUpload({ userId: owner, projectId: 'site', files: [video()] });
+  await queue.replaceOfflineItemFiles(item.id, [video()], { userId: owner });
+  const completedAt = '2026-09-30T10:00:00.000Z';
+  globalThis.fetch = async (url) => url === '/api/uploads'
+    ? ok({ uploadId: 'heic-transfer', sizeBytes: 32, offsetBytes: 32, status: 'OPEN' })
+    : finalized('heic-transfer', 32, { projectFileId: null, processing: true, completedAt });
+  assert.equal((await queue.syncOfflineItems({ userId: owner, kinds: ['VISIT_UPLOAD'] })).synced, 1);
+  assert.equal((await queue.listSuccessfulUploads(owner))[0].projectFileId, null);
+  globalThis.fetch = async (url) => {
+    assert.equal(url, '/api/uploads/heic-transfer');
+    return finalized('heic-transfer', 32, { projectFileId: 'canonical-jpeg' });
+  };
+  const [receipt] = await queue.refreshSuccessfulUploads(owner);
+  assert.equal(receipt.projectFileId, 'canonical-jpeg'); assert.equal(receipt.completedAt, completedAt);
+});
+
+test('an expired sibling gets a fresh session without duplicating already completed files in a multi-file draft', async () => {
+  const queue = await newTab();
+  const item = await queue.enqueueVisitUpload({ userId: owner, projectId: 'site', files: [video(32), video(64)] });
+  await queue.replaceOfflineItemFiles(item.id, [video(32), video(64)], { userId: owner });
+  const ids = [];
+  let expired = true;
+  globalThis.fetch = async (url, options) => {
+    if (url === '/api/uploads') {
+      const input = JSON.parse(options.body);
+      ids.push([input.sizeBytes, input.clientUploadId]);
+      return ok({ uploadId: `file-${input.sizeBytes}`, sizeBytes: input.sizeBytes, offsetBytes: expired && input.sizeBytes === 64 ? 0 : input.sizeBytes,
+        status: expired && input.sizeBytes === 64 ? 'CANCELLED' : 'COMPLETED' });
+    }
+    return finalized(url.includes('file-64') ? 'file-64' : 'file-32', url.includes('file-64') ? 64 : 32);
+  };
+  assert.equal((await queue.syncOfflineItems({ userId: owner, kinds: ['VISIT_UPLOAD'] })).synced, 0);
+  expired = false;
+  assert.equal((await queue.syncOfflineItems({ userId: owner, kinds: ['VISIT_UPLOAD'], force: true })).synced, 1);
+  assert.equal(ids[0][1], ids[2][1]);
+  assert.notEqual(ids[1][1], ids[3][1]);
+  assert.equal((await queue.listSuccessfulUploads(owner)).length, 2);
+});
+
+test('conflict recovery rejects an ACK from a different upload session before finalize or Blob deletion', async () => {
+  const queue = await newTab();
+  const item = await queue.enqueueVisitUpload({ userId: owner, projectId: 'site', files: [video()] });
+  await queue.replaceOfflineItemFiles(item.id, [video()], { userId: owner });
+  globalThis.fetch = async (url, options) => {
+    if (url === '/api/uploads') return ok({ uploadId: 'correct-upload', sizeBytes: 32, offsetBytes: 0, status: 'OPEN' });
+    if (options?.method === 'PATCH') return Response.json({ ok: false }, { status: 409 });
+    assert.equal(url, '/api/uploads/correct-upload');
+    return ok({ uploadId: 'different-upload', sizeBytes: 32, offsetBytes: 32, status: 'COMPLETED', projectFileId: 'other-file' });
+  };
+  assert.equal((await queue.syncOfflineItems({ userId: owner, kinds: ['VISIT_UPLOAD'] })).synced, 0);
+  assert.equal((await queue.listOfflineItems(['VISIT_UPLOAD'], owner))[0].files[0].size, 32);
+  assert.deepEqual(await queue.listSuccessfulUploads(owner), []);
+});
+
+test('receipt history is physically bounded per account and does not prune another account', async () => {
+  const queue = await newTab();
+  const item = await queue.enqueueVisitUpload({ userId: owner, projectId: 'site', files: [video()] });
+  await queue.replaceOfflineItemFiles(item.id, [video()], { userId: owner });
+  await new Promise((resolve, reject) => {
+    const request = indexedDB.open('kagu-saha-offline-v11');
+    request.onsuccess = () => {
+      const db = request.result;
+      const tx = db.transaction('successful-uploads', 'readwrite');
+      const store = tx.objectStore('successful-uploads');
+      for (const userId of [owner, 'person-b']) for (let index = 0; index < 100; index++) {
+        store.put({ id: `${userId}:old-${index}`, uploadId: `old-${index}`, uploadedByUserId: userId,
+          originalName: 'old.mp4', projectFileId: `old-file-${index}`, completedAt: new Date(Date.now() - (101 - index) * 1000).toISOString() });
+      }
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => { db.close(); reject(tx.error); };
+    };
+  });
+  globalThis.fetch = async (url) => url === '/api/uploads'
+    ? ok({ uploadId: 'new-delivery', sizeBytes: 32, offsetBytes: 32, status: 'OPEN' }) : finalized('new-delivery');
+  assert.equal((await queue.syncOfflineItems({ userId: owner, kinds: ['VISIT_UPLOAD'] })).synced, 1);
+  const recent = await queue.listSuccessfulUploads(owner);
+  assert.equal(recent.length, 100); assert.equal(recent[0].uploadId, 'new-delivery');
+  assert.equal(recent.some((row) => row.uploadId === 'old-0'), false);
+  const stored = await new Promise((resolve, reject) => {
+    const request = indexedDB.open('kagu-saha-offline-v11');
+    request.onsuccess = () => {
+      const db = request.result;
+      const tx = db.transaction('successful-uploads', 'readonly');
+      const read = tx.objectStore('successful-uploads').getAll();
+      tx.oncomplete = () => { db.close(); resolve(read.result); };
+      tx.onerror = () => { db.close(); reject(tx.error); };
+    };
+  });
+  assert.equal(stored.filter((row) => row.uploadedByUserId === owner).length, 100);
+  assert.equal(stored.filter((row) => row.uploadedByUserId === 'person-b').length, 100);
+});
+
+test('receipt store upgrade preserves V1.1 pending data and original legacy databases', async () => {
+  const pending = { id: 'v11-pending-before-receipts', userId: owner, schemaVersion: 2, type: 'VISIT_FILE', projectId: 'site',
+    createdAt: '2026-09-30T00:00:00Z', status: 'PENDING', prepared: true, files: [video()], expectedFileCount: 1 };
+  await addLegacy(pending);
+  await addLegacy({ id: 'v1-legacy', type: 'VISIT_FILE', files: [video()] }, 'kagu-saha-offline');
+  const queue = await newTab();
+  assert.equal((await queue.listOfflineItems(['VISIT_UPLOAD'], owner))[0].id, pending.id);
+  assert.deepEqual(await queue.listSuccessfulUploads(owner), []);
+  assert.equal((await storedItems('kagu-saha-offline'))[0].id, 'v1-legacy');
 });

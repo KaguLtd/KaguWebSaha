@@ -8,6 +8,8 @@ The product is intentionally simple:
 - Daily scheduling is the operational brain.
 - Personnel screens are fast mobile field entry points.
 
+For an **existing active installation**, use the [V1.1 upgrade notes](docs/V1_1_UYGULAMA_VE_YAYIN.md) and [CI/operations guide](docs/CI_VE_OPERASYON.md). Keep existing data and uploads; first-admin bootstrap and database reset are not upgrade steps.
+
 ## Stack
 
 - Next.js
@@ -19,13 +21,19 @@ The product is intentionally simple:
 
 ## Local Setup
 
+Use Node.js **24.15.0**, pinned in `.node-version`. Create a local `.env` from `.env.example` before the commands below; Prisma validation needs a `DATABASE_URL` declaration. Keep `MEDIA_WORKER_MODE=fallback` for local development without an independent worker.
+
 ```bash
-npm install
+npm ci
+npx prisma generate
 npm run prisma:validate
+npm test
+npm run typecheck
+npm run lint
 npm run build
 ```
 
-Create a local `.env` from `.env.example` before running database-backed features.
+Install development dependencies for validation, migrations and the web/worker build. Do not use `npm ci --omit=dev` before these steps. Production-only pruning, if used, comes after client generation, migration and build; preserve the generated Prisma client and compiled worker.
 
 For local development:
 
@@ -33,11 +41,13 @@ For local development:
 npm run dev
 ```
 
-Before deploy or acceptance testing:
+Production configuration check, after building and preparing absolute storage paths:
 
 ```bash
-npm run deploy:preflight
+npm run deploy:preflight -- --mode=upgrade --env-file=/etc/kagu-saha/runtime.env --worker-env-file=/etc/kagu-saha/runtime.env
 ```
+
+The default preflight mode is `upgrade`: no bootstrap credentials or DB connection. `--mode=bootstrap` additionally checks first-admin variables. Service environment variables override values loaded from the environment file. See the operations guide for local fallback and worker readiness checks.
 
 ## First Admin Bootstrap
 
@@ -65,22 +75,13 @@ npx prisma migrate dev
 npm run admin:bootstrap
 ```
 
-Test or production deployment:
-
-```bash
-npx prisma generate
-npx prisma validate
-npx prisma migrate deploy
-npm run admin:bootstrap
-npm run build
-npm run start
-```
+For existing installations, test the additive migration and restore procedure on an isolated copy before the approved production update. Follow the upgrade guide; it starts both web and worker and never repeats bootstrap. For a new, empty installation only, follow [GO_LIVE](docs/GO_LIVE.md).
 
 ## File Storage
 
 Uploaded files are stored under `UPLOAD_DIR`. If `UPLOAD_DIR` is not set, the app uses `./uploads`.
 
-Create the folder before deployment and make sure the Node.js process can write to it.
+In production use the same **absolute, persistent** `UPLOAD_DIR` for web and worker. It must be writable by both service processes and backed up with the database. Worker heartbeat storage is separate and private. Relative paths and `./uploads` remain a local-development convenience.
 
 ## Health Check
 
@@ -93,6 +94,8 @@ Expected response:
 ```json
 {"ok":true,"service":"kagu-saha"}
 ```
+
+This endpoint confirms the web process responds. It does not prove database migrations, writable storage or a working media service. After both services start, run preflight with `--check-worker` and inspect the oldest pending job age; see [CI/operations](docs/CI_VE_OPERASYON.md).
 
 ## Smoke Test
 
@@ -111,7 +114,7 @@ npm run worker:media
 
 ## Go-Live
 
-After acceptance testing passes, use `docs/GO_LIVE.md` before resetting test data or entering real customer/project records.
+Use [GO_LIVE](docs/GO_LIVE.md) only for first installation on an empty/disposable database. Active upgrades use the V1.1 release and operations guides above.
 
 ## Product Guardrails
 

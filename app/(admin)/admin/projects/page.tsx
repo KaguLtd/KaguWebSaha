@@ -176,7 +176,7 @@ export default async function ProjectsPage({
                           <span className="sr-only">Gecmisi Incele</span>
                         </Link>
                       </Button>
-                      <QuickProjectNote iconOnly projectId={project.id} projectName={project.name} />
+                      <QuickProjectNote iconOnly projectId={project.id} projectName={project.name} userId={user.id} />
                     </div>
                   </div>
                 </article>
@@ -224,7 +224,7 @@ export default async function ProjectsPage({
                           <Button asChild size="sm" variant="outline">
                             <Link href={`/admin/projects/${project.id}`}>Gecmisi Incele</Link>
                           </Button>
-                          <QuickProjectNote projectId={project.id} projectName={project.name} />
+                          <QuickProjectNote projectId={project.id} projectName={project.name} userId={user.id} />
                         </div>
                       </td>
                     </tr>

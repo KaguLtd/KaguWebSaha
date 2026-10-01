@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, 'codex/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Tests, types, lint and web/worker build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: postgresql://ci_unused:ci_unused@127.0.0.1:1/kagu_saha_ci_build?schema=public&connect_timeout=1
+      APP_ORIGIN: http://localhost:3000
+      UPLOAD_DIR: ${{ runner.temp }}/kagu-ci-uploads
+      MEDIA_WORKER_MODE: external
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run prisma:validate
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build
+
+  migration:
+    name: Isolated PostgreSQL legacy upgrade
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: kagu_ci
+          POSTGRES_PASSWORD: ci_only_password
+          POSTGRES_DB: kagu_saha_ci_v11
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U kagu_ci -d kagu_saha_ci_v11"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      CI_DATABASE_URL: postgresql://kagu_ci:ci_only_password@127.0.0.1:5432/kagu_saha_ci_v11?schema=public
+      DATABASE_URL: postgresql://kagu_ci:ci_only_password@127.0.0.1:5432/kagu_saha_ci_v11?schema=public
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - name: Apply old migrations, seed synthetic records, verify V1.1 preservation
+        run: node scripts/test-migrations-ci.mjs

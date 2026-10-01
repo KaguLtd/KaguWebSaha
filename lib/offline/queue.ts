@@ -1,6 +1,8 @@
 "use client";
 import { createClientId } from "@/lib/offline/client-id";
 import { prepareFilesForUpload } from "@/lib/client/image-compression";
+import { JsonRequestError, requestJson } from "@/lib/client/json-request";
+import { acknowledgeUploadChunk, shrinkUploadChunk, uploadChunkState, type AdaptiveUploadChunkState } from "@/lib/client/adaptive-upload-chunks";
 
 export type OfflineQueueKind = "PERSONNEL" | "VISIT_UPLOAD";
 export type PersonnelEventType = "ARRIVED_SITE" | "LEFT_SITE" | "NOTE";
@@ -9,6 +11,7 @@ type QueueItemBase = {
   files?: File[]; expectedFileCount?: number; status?: "PENDING" | "FAILED";
   lastError?: string; nextAttemptAt?: number; attempts?: number;
   prepared?: boolean; uploadGeneration?: string; sendingBy?: string; sendingUntil?: number; sequence?: number;
+  chunkState?: AdaptiveUploadChunkState; uploadFileGenerations?: Record<string, string>;
 };
 export type PersonnelEventQueueItem = QueueItemBase & {
   type: "PERSONNEL_EVENT"; eventType: PersonnelEventType; taskId: string;
@@ -23,13 +26,19 @@ export type VisitUploadQueueItem = QueueItemBase & {
 export type OfflineQueueItem = PersonnelEventQueueItem | PersonnelFileQueueItem | VisitUploadQueueItem;
 export type OfflineSyncProgress = { current: number; itemId: string; kind: OfflineQueueKind; progress: number; total: number };
 export type OfflineSyncResult = { error?: string; failedIds: string[]; remaining: number; synced: number };
+export type SuccessfulUploadReceipt = {
+  id: string; uploadedByUserId: string; uploadId: string; projectFileId: string | null;
+  completedAt: string; originalName: string;
+};
 type SyncOptions = { kinds?: OfflineQueueKind[]; userId: string; eventsOnly?: boolean; force?: boolean; onProgress?: (progress: OfflineSyncProgress) => void };
 type EnqueueEvent = { userId: string; taskId: string; projectId: string; eventType: PersonnelEventType; note?: string; latitude?: string; longitude?: string; occurredAt?: string; actualHeadcount?: number; files?: File[] };
 // Old open V1 tabs cannot read or delete V1.1 records with their legacy syncer.
 const DB_NAME = "kagu-saha-offline-v11";
 const LEGACY_DB_NAME = "kagu-saha-offline";
 const STORE_NAME = "pending-items";
-const DB_VERSION = 1;
+const RECEIPTS_STORE_NAME = "successful-uploads";
+const DB_VERSION = 2;
+const MAX_RECEIPTS_PER_ACCOUNT = 100;
 const MAX_FILE_BYTES = 100 * 1024 * 1024;
 const PAGE_ID = createClientId();
 const activeSyncs = new Map<string, { promise: Promise<OfflineSyncResult>; listeners: Set<NonNullable<SyncOptions["onProgress"]>> }>();
@@ -44,18 +53,19 @@ function openQueueDb() {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
       if (!request.result.objectStoreNames.contains(STORE_NAME)) request.result.createObjectStore(STORE_NAME, { keyPath: "id" });
+      if (!request.result.objectStoreNames.contains(RECEIPTS_STORE_NAME)) request.result.createObjectStore(RECEIPTS_STORE_NAME, { keyPath: "id" });
     };
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => { request.result.onversionchange = () => request.result.close(); resolve(request.result); };
     request.onerror = () => reject(request.error);
     request.onblocked = () => reject(new Error("Cihaz depolaması başka bir sekmede güncelleniyor."));
   });
 }
-async function withStore<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T> | void) {
+async function withStore<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T> | void, storeName = STORE_NAME) {
   const db = await openQueueDb();
   return new Promise<T | undefined>((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, mode);
+    const transaction = db.transaction(storeName, mode);
     let result: T | undefined;
-    const request = run(transaction.objectStore(STORE_NAME));
+    const request = run(transaction.objectStore(storeName));
     if (request) request.onsuccess = () => { result = request.result; };
     transaction.oncomplete = () => { db.close(); resolve(result); };
     transaction.onabort = transaction.onerror = () => { db.close(); reject(transaction.error ?? request?.error ?? new Error("Cihaza kayıt tamamlanamadı.")); };
@@ -132,7 +142,7 @@ export async function replaceOfflineItemFiles(id: string, files: File[], options
     if (item.userId !== options.userId) return;
     if (options.resetUpload && (item.sendingUntil ?? 0) > Date.now()) return;
     return { ...item, files, expectedFileCount: files.length, prepared: options.prepared ?? true, status: "PENDING", lastError: undefined, nextAttemptAt: 0,
-      ...(options.resetUpload ? { uploadGeneration: createClientId() } : {}) };
+      ...(options.resetUpload ? { uploadGeneration: createClientId(), uploadFileGenerations: undefined, chunkState: undefined } : {}) };
   });
   if (!changed) throw new Error("Kayıt bulunamadı, başka hesaba ait veya halen gönderiliyor.");
   notifyQueueChange();
@@ -149,6 +159,47 @@ export async function listOfflineItems(kinds?: OfflineQueueKind[], userId?: stri
   if (!userId) return [];
   return stored.filter(isOwnedQueueItem).filter((item) => item.userId === userId && (!kinds || kinds.includes(getQueueItemKind(item))))
     .sort((a, b) => (a.sequence ?? Date.parse(a.createdAt) * 1000) - (b.sequence ?? Date.parse(b.createdAt) * 1000));
+}
+function isSuccessfulUploadReceipt(value: unknown): value is SuccessfulUploadReceipt {
+  if (!value || typeof value !== "object") return false;
+  const receipt = value as Partial<SuccessfulUploadReceipt>;
+  return typeof receipt.id === "string" && typeof receipt.uploadedByUserId === "string" && typeof receipt.uploadId === "string" &&
+    (receipt.projectFileId === null || typeof receipt.projectFileId === "string") && typeof receipt.originalName === "string" &&
+    typeof receipt.completedAt === "string" && Number.isFinite(Date.parse(receipt.completedAt));
+}
+/** Device-local delivery receipts; no media, note, project or task contents are retained. */
+export async function listSuccessfulUploads(userId: string): Promise<SuccessfulUploadReceipt[]> {
+  if (!userId) return [];
+  const rows = (await withStore<unknown[]>("readonly", (store) => store.getAll(), RECEIPTS_STORE_NAME)) ?? [];
+  return rows.filter(isSuccessfulUploadReceipt).filter((receipt) => receipt.uploadedByUserId === userId)
+    .sort((a, b) => Date.parse(b.completedAt) - Date.parse(a.completedAt)).slice(0, MAX_RECEIPTS_PER_ACCOUNT);
+}
+async function rememberSuccessfulUpload(receipt: SuccessfulUploadReceipt) {
+  await withStore("readwrite", (store) => {
+    const read = store.getAll();
+    read.onsuccess = () => {
+      const owned = (read.result as unknown[]).filter(isSuccessfulUploadReceipt).filter((row) => row.uploadedByUserId === receipt.uploadedByUserId);
+      const previous = owned.find((row) => row.id === receipt.id);
+      const next = { ...receipt, completedAt: previous?.completedAt ?? receipt.completedAt };
+      store.put(next);
+      const retained = [next, ...owned.filter((row) => row.id !== next.id)].sort((a, b) => Date.parse(b.completedAt) - Date.parse(a.completedAt));
+      for (const expired of retained.slice(MAX_RECEIPTS_PER_ACCOUNT)) store.delete(expired.id);
+    };
+  }, RECEIPTS_STORE_NAME);
+}
+/** Resolve completed HEIC deliveries to their eventual canonical file ID. Failures retain receipts. */
+export async function refreshSuccessfulUploads(userId: string): Promise<SuccessfulUploadReceipt[]> {
+  const receipts = await listSuccessfulUploads(userId);
+  if (!navigator.onLine) return receipts;
+  for (const receipt of receipts.filter((row) => row.projectFileId === null)) {
+    try {
+      const upload = await requestJson<UploadResponse>(`/api/uploads/${encodeURIComponent(receipt.uploadId)}`);
+      if (upload.uploadId === receipt.uploadId && upload.status === "COMPLETED" && typeof upload.projectFileId === "string" && upload.projectFileId) {
+        await rememberSuccessfulUpload({ ...receipt, projectFileId: upload.projectFileId });
+      }
+    } catch (error) { if (error instanceof JsonRequestError && [0, 401, 503].includes(error.status)) break; }
+  }
+  return listSuccessfulUploads(userId);
 }
 export async function countLegacyOfflineItems() {
   const stored = (await withStore<unknown[]>("readonly", (store) => store.getAll())) ?? [];
@@ -168,10 +219,7 @@ export async function countLegacyOfflineItems() {
 }
 export type LegacyOfflineRecord = { id: string; type: string; createdAt: string; note: string; projectId: string; taskId: string; files: File[]; expectedFileCount: number };
 export async function readLegacyOfflineItemsForRecovery(): Promise<LegacyOfflineRecord[]> {
-  const response = await boundedFetch("/api/offline/legacy-access", { cache: "no-store" }, 15_000);
-  if (!response.ok || response.redirected) throw new Error("Eski kayıtları yalnız yönetici hesabı kurtarabilir.");
-  const permission = await response.json();
-  if (permission.ok !== true) throw new Error("Kurtarma yetkisi doğrulanamadı.");
+  await requestJson("/api/offline/legacy-access", {}, 15_000);
   const old = await new Promise<unknown[]>((resolve, reject) => {
     const request = indexedDB.open(LEGACY_DB_NAME);
     request.onerror = () => reject(request.error);
@@ -269,7 +317,7 @@ async function runSync(options: SyncOptions & { kinds: OfflineQueueKind[] }): Pr
     try {
       report(0); await sendItem(original, report); await deleteOfflineItem(original.id, options.userId, { allowSending: true }); synced += 1; report(100);
     } catch (cause) {
-      const failure = cause instanceof QueueError ? cause : new QueueError("Bağlantı kesildi. Kayıt cihazda korunuyor.", 0);
+      const failure = cause instanceof QueueError || cause instanceof JsonRequestError ? cause : new QueueError("Bağlantı kesildi. Kayıt cihazda korunuyor.", 0);
       error = failure.message; failedIds.push(original.id);
       if (original.type === "PERSONNEL_EVENT") blockedTasks.add(original.taskId);
       const permanent = [400, 403, 404, 413, 422].includes(failure.status);
@@ -284,27 +332,22 @@ async function runSync(options: SyncOptions & { kinds: OfflineQueueKind[] }): Pr
   return { error, failedIds, synced, remaining: (await listOfflineItems(options.kinds, options.userId)).length };
 }
 class QueueError extends Error { constructor(message: string, readonly status: number) { super(message); } }
-type UploadResponse = { ok: boolean; error?: string; uploadId: string; offsetBytes: number; sizeBytes: number; status: string; processing?: boolean };
-async function jsonRequest<T>(url: string, options: RequestInit = {}): Promise<T> {
-  const response = await boundedFetch(url, { ...options, cache: "no-store" }, 30_000);
-  const payload = await response.json().catch(() => ({}));
-  if (response.redirected || response.status === 401) throw new QueueError("Oturum süresi doldu. Kayıt cihazda korundu; tekrar giriş yapın.", 401);
-  if (!response.ok || payload.ok !== true) throw new QueueError(payload.error || "Sunucu kaydı kabul etmedi.", response.status || 503);
-  return payload as T;
+type UploadResponse = { ok: true; uploadId: string; offsetBytes: number; sizeBytes: number; status: string; processing?: boolean; projectFileId: string | null; completedAt?: string | null };
+function validateUploadResponse(upload: UploadResponse, sizeBytes: number, uploadId?: string) {
+  if (!upload || typeof upload.uploadId !== "string" || !upload.uploadId || (uploadId && upload.uploadId !== uploadId) ||
+    !Number.isSafeInteger(upload.offsetBytes) || upload.offsetBytes < 0 || upload.offsetBytes > sizeBytes || upload.sizeBytes !== sizeBytes ||
+    !["OPEN", "PROCESSING", "COMPLETED", "CANCELLED"].includes(upload.status)) {
+    throw new QueueError("Sunucudan geçerli yükleme konumu alınamadı. Dosya cihazda korunuyor.", 503);
+  }
 }
-async function boundedFetch(url: string, options: RequestInit, timeout: number) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
-  try { return await fetch(url, { ...options, signal: controller.signal }); }
-  finally { clearTimeout(timer); }
-}
-async function restartExpiredUpload(item: OfflineQueueItem) {
-  await mutateItem(item.id, (stored) => stored.userId === item.userId ? { ...stored, uploadGeneration: createClientId() } : undefined);
+async function restartExpiredUpload(item: OfflineQueueItem, index: number) {
+  // Only this file gets a new session; already published siblings retain their original identity.
+  await mutateItem(item.id, (stored) => stored.userId === item.userId ? { ...stored, uploadFileGenerations: { ...stored.uploadFileGenerations, [index]: createClientId() } } : undefined);
   throw new QueueError("Geçici yükleme süresi doldu. Cihazdaki dosya korunarak yeni yükleme başlayacak.", 409);
 }
 async function sendItem(item: OfflineQueueItem, onProgress: (progress: number) => void) {
   if (item.type === "PERSONNEL_EVENT") {
-    await jsonRequest("/api/offline/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+    await requestJson("/api/offline/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
       ownerUserId: item.userId, type: item.eventType, taskId: item.taskId, clientItemId: item.id, occurredAt: item.occurredAt,
       note: item.note, latitude: item.latitude, longitude: item.longitude, actualHeadcount: item.actualHeadcount,
     }) }); return;
@@ -312,28 +355,59 @@ async function sendItem(item: OfflineQueueItem, onProgress: (progress: number) =
   let files = (item.files ?? []).filter((file) => file instanceof Blob && file.size > 0);
   if (!files.length || files.length < (item.expectedFileCount ?? 0)) throw new QueueError("Dosya cihazda bulunamadı. Kaydı silmeden dosyayı yeniden seçin.", 422);
   if (!item.prepared) { files = await prepareFilesForUpload(files); await replaceOfflineItemFiles(item.id, files, { userId: item.userId }); }
+  let chunkState = uploadChunkState(item.chunkState);
+  const saveChunkState = async () => {
+    const saved = await mutateItem(item.id, (stored) => stored.userId === item.userId ? { ...stored, chunkState } : undefined);
+    if (!saved) throw new QueueError("Cihazdaki yükleme durumu saklanamadı. Dosya korunuyor.", 503);
+  };
   for (const [index, file] of files.entries()) {
-    let upload = await jsonRequest<UploadResponse>("/api/uploads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
-      ownerUserId: item.userId, clientUploadId: `${item.id}_${item.uploadGeneration ?? "v1"}_${index}`, projectId: item.projectId, dailyTaskId: item.type === "PERSONNEL_FILE" ? item.taskId : undefined,
+    let upload = await requestJson<UploadResponse>("/api/uploads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+      ownerUserId: item.userId, clientUploadId: `${item.id}_${item.uploadFileGenerations?.[index] ?? item.uploadGeneration ?? "v1"}_${index}`, projectId: item.projectId, dailyTaskId: item.type === "PERSONNEL_FILE" ? item.taskId : undefined,
       projectVisitId: item.type === "VISIT_FILE" ? item.projectVisitId : undefined,
       originalName: file.name || `dosya-${index + 1}`, mimeType: file.type || "application/octet-stream", sizeBytes: file.size, note: item.note,
     }) });
-    if (upload.status === "CANCELLED") await restartExpiredUpload(item);
+    validateUploadResponse(upload, file.size);
+    if (upload.status === "CANCELLED") await restartExpiredUpload(item, index);
     let conflicts = 0;
     while (upload.offsetBytes < file.size) {
-      const chunk = file.slice(upload.offsetBytes, Math.min(file.size, upload.offsetBytes + 128 * 1024));
-      const response = await boundedFetch(`/api/uploads/${upload.uploadId}`, { method: "PATCH", headers: { "Upload-Offset": String(upload.offsetBytes), "Content-Type": "application/octet-stream" }, body: chunk }, 120_000);
-      if (response.status === 410) await restartExpiredUpload(item);
-      if (response.status === 409) {
-        if (++conflicts > 3) throw new QueueError("Yükleme başka bir sekmede işleniyor. Kayıt korunarak yeniden denenecek.", 409);
-        upload = await jsonRequest<UploadResponse>(`/api/uploads/${upload.uploadId}`); continue;
+      const chunk = file.slice(upload.offsetBytes, Math.min(file.size, upload.offsetBytes + chunkState.chunkBytes));
+      const startedAt = performance.now();
+      let acknowledged: UploadResponse;
+      try {
+        acknowledged = await requestJson<UploadResponse>(`/api/uploads/${upload.uploadId}`, { method: "PATCH", headers: { "Upload-Offset": String(upload.offsetBytes), "Content-Type": "application/octet-stream" }, body: chunk }, 120_000);
+      } catch (error) {
+        if (error instanceof JsonRequestError && error.status === 410) await restartExpiredUpload(item, index);
+        if (error instanceof JsonRequestError && error.status === 409) {
+          if (++conflicts > 3) throw new QueueError("Yükleme başka bir sekmede işleniyor. Kayıt korunarak yeniden denenecek.", 409);
+          const previous = upload.offsetBytes;
+          const expectedUploadId = upload.uploadId;
+          const refreshed = await requestJson<UploadResponse>(`/api/uploads/${expectedUploadId}`);
+          validateUploadResponse(refreshed, file.size, expectedUploadId);
+          upload = refreshed;
+          if (upload.offsetBytes < previous) throw new QueueError("Sunucu yükleme konumu geriledi. Dosya cihazda korunuyor.", 503);
+          continue;
+        }
+        if (error instanceof JsonRequestError && error.status !== 401 && (error.status === 0 || error.status >= 500)) {
+          chunkState = shrinkUploadChunk(chunkState); await saveChunkState();
+        }
+        throw error;
       }
-      const payload = await response.json().catch(() => ({}));
-      if (response.redirected || response.status === 401) throw new QueueError("Oturum süresi doldu; dosya cihazda korunuyor.", 401);
-      if (!response.ok || payload.ok !== true) throw new QueueError(payload.error || "Dosya parçası gönderilemedi.", response.status);
-      upload = payload as UploadResponse; conflicts = 0;
+      validateUploadResponse(acknowledged, file.size, upload.uploadId);
+      if (acknowledged.offsetBytes < upload.offsetBytes + chunk.size) throw new QueueError("Dosya parçası henüz doğrulanmadı. Kayıt cihazda korunuyor.", 503);
+      chunkState = acknowledgeUploadChunk(chunkState, chunk.size, performance.now() - startedAt);
+      await saveChunkState();
+      upload = acknowledged; conflicts = 0;
       onProgress(Math.round(((index + upload.offsetBytes / file.size) / files.length) * 96));
     }
-    await jsonRequest(`/api/uploads/${upload.uploadId}/finalize`, { method: "POST" });
+    const finalized = await requestJson<UploadResponse>(`/api/uploads/${upload.uploadId}/finalize`, { method: "POST" });
+    validateUploadResponse(finalized, file.size, upload.uploadId);
+    if (finalized.status !== "COMPLETED" || finalized.offsetBytes !== file.size ||
+      !((typeof finalized.projectFileId === "string" && finalized.projectFileId) || (finalized.projectFileId === null && finalized.processing === true))) {
+      throw new QueueError("Dosyanın kayıt onayı doğrulanamadı. Dosya cihazda korunuyor.", 503);
+    }
+    // A receipt failure leaves the queued Blob intact; an idempotent finalize can retry safely.
+    await rememberSuccessfulUpload({ id: `${item.userId}:${finalized.uploadId}`, uploadedByUserId: item.userId, uploadId: finalized.uploadId,
+      projectFileId: finalized.projectFileId, completedAt: finalized.completedAt && Number.isFinite(Date.parse(finalized.completedAt)) ? finalized.completedAt : new Date().toISOString(),
+      originalName: file.name || `dosya-${index + 1}` });
   }
 }
