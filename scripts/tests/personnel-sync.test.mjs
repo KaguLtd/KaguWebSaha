@@ -107,3 +107,19 @@ test('past notes allow task day7, retain day8 failures and replay an already sav
   assert.equal((await send('day7-note-001')).status, 200); assert.equal(state.notes.length, before + 1);
   assert.equal(state.receipts.has('person-A:day8-note-001'), false);
 });
+
+test('unexpected persistence failures log a Prisma code without leaking the database message or request note', async (t) => {
+  const logged = [];
+  t.mock.method(console, 'error', (...args) => logged.push(args));
+  t.mock.method(db.dailyTask, 'findFirst', async () => {
+    throw Object.assign(new Error('postgresql://user:private-db-password@db/live; sensitive-note'), { code: 'P2022', meta: { message: 'private-db-password' } });
+  });
+  const response = await POST(new Request('http://test/api/offline/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ownerUserId: 'person-A', type: 'NOTE', taskId: 'task-A', clientItemId: 'diagnostic-note-001', note: 'sensitive-note' }) }));
+  assert.equal(response.status, 503);
+  assert.match(JSON.stringify(logged), /P2022/);
+  for (const output of [JSON.stringify(logged), JSON.stringify(await response.json())]) {
+    assert.doesNotMatch(output, /private-db-password|sensitive-note|postgresql/);
+  }
+  assert.equal(state.receipts.has('person-A:diagnostic-note-001'), false);
+});

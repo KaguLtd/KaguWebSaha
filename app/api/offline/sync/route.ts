@@ -47,7 +47,9 @@ export async function POST(request: Request) {
     const result = await runOfflineOperation({ userId: user.id, clientItemId: text(payload, "clientItemId") || undefined, type, payload: operationPayload }, async (tx) => {
       // Shared task status affects every assignee. A short global transition
       // lock also prevents overlapping shared tasks from starting concurrently.
-      if (type !== "NOTE") await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('kagu-saha-site-events'))`;
+      // Prisma cannot deserialize PostgreSQL void. Cast only the result; the
+      // transaction lock still serializes overlapping arrival/departure writes.
+      if (type !== "NOTE") await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('kagu-saha-site-events'))::text`;
       await tx.$queryRaw`SELECT id FROM users WHERE id = ${user.id} FOR UPDATE`;
       await tx.$queryRaw`SELECT id FROM daily_tasks WHERE id = ${taskId} FOR UPDATE`;
       const today = getTodayDateOnly();
@@ -104,6 +106,11 @@ export async function POST(request: Request) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Kayıt kaydedilemedi.";
     const invalid = error instanceof InputError || error instanceof SyntaxError;
+    if (!invalid) {
+      // Error messages/metadata can contain query values; log only a Prisma code.
+      const code = error && typeof error === "object" && "code" in error && /^P\d{4}$/.test(String(error.code)) ? String(error.code) : "UNKNOWN";
+      console.error("[personnel-sync] Persistence failed; device record retained.", { code });
+    }
     return NextResponse.json({ error: invalid ? message : "Sunucu kaydı şu anda tamamlayamadı. Cihazdaki kayıt korunuyor." }, { status: invalid ? 400 : 503 });
   }
 }

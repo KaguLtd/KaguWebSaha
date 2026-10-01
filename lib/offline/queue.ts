@@ -297,15 +297,20 @@ async function runSync(options: SyncOptions & { kinds: OfflineQueueKind[] }): Pr
   let synced = 0; let error: string | undefined;
   const failedIds: string[] = [];
   const claimToken = `${PAGE_ID}:${createClientId()}`;
+  // An in-flight event in another tab preserves order for all task events.
   const blockedTasks = new Set<string>();
+  // A rejected/backed-off event blocks later state transitions. Independent
+  // notes can still commit, and each photo waits only for its own note receipt.
+  const blockedTransitions = new Set<string>();
   for (const [index, original] of ordered.entries()) {
     if (options.eventsOnly && original.type !== "PERSONNEL_EVENT") continue;
     if (original.status === "FAILED" || (!options.force && (original.nextAttemptAt ?? 0) > Date.now())) {
       if (original.lastError) error = original.lastError;
-      if (original.type === "PERSONNEL_EVENT") blockedTasks.add(original.taskId);
+      if (original.type === "PERSONNEL_EVENT") blockedTransitions.add(original.taskId);
       continue;
     }
     if ("taskId" in original && blockedTasks.has(original.taskId)) continue;
+    if (original.type === "PERSONNEL_EVENT" && original.eventType !== "NOTE" && blockedTransitions.has(original.taskId)) continue;
     if (original.type === "PERSONNEL_FILE" && (await listOfflineItems(["PERSONNEL"], options.userId)).some((item) => item.id === original.dependencyId)) continue;
     const claimed = await mutateItem(original.id, (item) => {
       if (item.sendingBy && (item.sendingUntil ?? 0) > Date.now()) return;
@@ -319,11 +324,13 @@ async function runSync(options: SyncOptions & { kinds: OfflineQueueKind[] }): Pr
     } catch (cause) {
       const failure = cause instanceof QueueError || cause instanceof JsonRequestError ? cause : new QueueError("Bağlantı kesildi. Kayıt cihazda korunuyor.", 0);
       error = failure.message; failedIds.push(original.id);
-      if (original.type === "PERSONNEL_EVENT") blockedTasks.add(original.taskId);
+      if (original.type === "PERSONNEL_EVENT") blockedTransitions.add(original.taskId);
       const permanent = [400, 403, 404, 413, 422].includes(failure.status);
       await mutateItem(original.id, (item) => ({ ...item, status: permanent ? "FAILED" : "PENDING", lastError: failure.message,
         attempts: (item.attempts ?? 0) + 1, nextAttemptAt: Date.now() + Math.min(300_000, 5_000 * 2 ** Math.min(item.attempts ?? 0, 6)) }));
-      if ([0, 401, 503].includes(failure.status)) break;
+      // A 503 on one route need not stop independent notes/uploads. Network and
+      // authentication failures still stop the pass to preserve account safety.
+      if ([0, 401].includes(failure.status)) break;
     } finally {
       window.clearInterval(heartbeat);
       await mutateItem(original.id, (item) => item.sendingBy === claimToken ? { ...item, sendingBy: undefined, sendingUntil: undefined } : undefined);

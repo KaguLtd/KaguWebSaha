@@ -75,3 +75,5 @@ jobs:
       - run: npx prisma generate
       - name: Apply old migrations, seed synthetic records, verify V1.1 preservation
         run: node scripts/test-migrations-ci.mjs
+      - name: Verify personnel arrival, note and two photos against PostgreSQL
+        run: node --import ./scripts/register-typescript.mjs scripts/test-personnel-sync-ci.mjs
