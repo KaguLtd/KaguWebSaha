@@ -59,6 +59,23 @@ async function main() {
     const project = await client.project.create({ data: { name: "Synthetic sync project", customerId: customer.id } });
     const taskData = { taskDate: getTodayDateOnly(), projectId: project.id, title: "Synthetic sync task", createdByUserId: "ci-admin", assignees: { create: { userId: user.id } } };
     const task = await client.dailyTask.create({ data: taskData });
+    // Receipt FK checks acquire KEY SHARE on the user. With the original
+    // FOR UPDATE, two claims can deadlock while one waits for the advisory lock.
+    let claims = 0;
+    let releaseClaims;
+    const bothClaimed = new Promise((resolve) => { releaseClaims = resolve; });
+    const originalLockResults = await Promise.allSettled([1, 2].map((index) => client.$transaction(async (tx) => {
+      await tx.offlinePendingItem.create({ data: { userId: user.id, clientItemId: `ci-original-user-lock-${index}`, type: "ARRIVED_SITE", payload: {}, status: "PENDING" } });
+      if (++claims === 2) releaseClaims();
+      await bothClaimed;
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('ci-original-user-lock'))::text`;
+      await tx.$queryRaw`SELECT id FROM users WHERE id = ${user.id} FOR UPDATE`;
+    }, { timeout: 30_000 })));
+    const originalFailures = originalLockResults.filter((result) => result.status === "rejected");
+    assert.equal(originalFailures.length, 1);
+    assert.equal(originalFailures[0].reason.code, "P2010");
+    assert.equal(originalFailures[0].reason.meta?.code, "40P01");
+    console.log("Reproduced original receipt/user-lock deadlock (40P01).");
     const origin = process.env.APP_ORIGIN;
     const jsonRequest = (url, body) => new Request(`${origin}${url}`, { method: "POST", headers: { "Content-Type": "application/json", Origin: origin }, body: JSON.stringify(body) });
     const send = (type, id, extra = {}) => sync.POST(jsonRequest("/api/offline/sync", {
