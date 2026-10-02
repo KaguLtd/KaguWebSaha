@@ -55,11 +55,24 @@ export async function compressImageFile(file: File): Promise<File> {
   }
 }
 
-export async function prepareFilesForUpload(files: File[]): Promise<File[]> {
+export async function prepareFilesForUpload(files: File[], signal?: AbortSignal): Promise<File[]> {
   const preparedFiles: File[] = [];
 
   for (const file of files) {
-    preparedFiles.push(await compressImageFile(file));
+    signal?.throwIfAborted();
+    // Some mobile browsers never resolve image decoding/canvas conversion.
+    // Keep the original if preparation stalls, and allow the user to stop it.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let abort: () => void = () => {};
+    try {
+      const fallback = new Promise<File>((resolve, reject) => {
+        timer = setTimeout(() => resolve(file), 20_000);
+        abort = () => reject(new Error("Gönderim durduruldu."));
+        signal?.addEventListener("abort", abort, { once: true });
+      });
+      preparedFiles.push(await Promise.race([compressImageFile(file), fallback]));
+      signal?.throwIfAborted();
+    } finally { clearTimeout(timer); signal?.removeEventListener("abort", abort); }
   }
 
   return preparedFiles;

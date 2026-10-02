@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Camera, ClipboardPenLine, MapPinCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { UploadProgress } from "@/components/personnel/upload-progress";
 import { NoteDraftRecovery } from "@/components/admin/note-draft-recovery";
 import { isCompressibleImage } from "@/lib/client/image-compression";
 import {
@@ -89,9 +90,9 @@ export function VisitInteractionPanel({
       const result = await syncOfflineItems({
         kinds: ["VISIT_UPLOAD"],
         userId,
-        onProgress: ({ current, progress, total }) => {
+        onProgress: ({ current, overallProgress, total }) => {
           setUploadMessage(`${current}/${total} ziyaret kaydı yükleniyor...`);
-          setUploadProgress(progress);
+          setUploadProgress(overallProgress);
         },
       });
 
@@ -224,7 +225,7 @@ export function VisitInteractionPanel({
             ? "Video cihazda saklandı, yükleme uzun sürebilir..."
             : "Dosyalar güvenli kuyrukta, yükleme başlıyor...",
       );
-      setUploadProgress(6);
+      setUploadProgress(0);
 
       if (!navigator.onLine) {
         setUploadMessage("İnternet yok. Dosyalar cihazda saklandı ve bağlantıda yüklenecek.");
@@ -235,9 +236,9 @@ export function VisitInteractionPanel({
       const result = await syncOfflineItems({
         kinds: ["VISIT_UPLOAD"],
         userId,
-        onProgress: ({ current, progress, total }) => {
+        onProgress: ({ current, overallProgress, total }) => {
           setUploadMessage(`${current}/${total} ziyaret kaydı yükleniyor...`);
-          setUploadProgress(progress);
+          setUploadProgress(overallProgress);
         },
       });
       const remainingItems = await listOfflineItems(["VISIT_UPLOAD"], userId);
@@ -410,28 +411,15 @@ export function VisitInteractionPanel({
         ) : null}
         {uploadMessage || pendingUploads > 0 ? (
           <div
-            aria-valuemax={uploadProgress !== null ? 100 : undefined}
-            aria-valuemin={uploadProgress !== null ? 0 : undefined}
-            aria-valuenow={uploadProgress ?? undefined}
             className="relative overflow-hidden rounded-md border border-primary/20 bg-white px-3 py-2 text-sm text-muted-foreground"
-            role={uploadProgress !== null ? "progressbar" : "status"}
+            role="status"
           >
-            {uploadProgress !== null ? (
-              <div
-                className="absolute inset-y-0 left-0 overflow-hidden bg-primary/10 transition-[width] duration-300 ease-out"
-                style={{ width: `${uploadProgress}%` }}
-              >
-                <div className="h-full w-full animate-pulse bg-gradient-to-r from-primary/5 via-primary/25 to-primary/10" />
-              </div>
-            ) : null}
             <div className="relative flex items-center justify-between gap-3">
               <span>
                 {uploadMessage || `${pendingUploads} ziyaret yüklemesi bağlantı bekliyor.`}
               </span>
-              {uploadProgress !== null ? (
-                <span className="shrink-0 tabular-nums">%{uploadProgress}</span>
-              ) : null}
             </div>
+            {uploadProgress !== null ? <UploadProgress value={uploadProgress} /> : null}
           </div>
         ) : null}
         {message ? (

@@ -168,24 +168,21 @@ export function ScheduleDrawerCalendar({
 
             return (
               <div
-                  className={`h-48 min-w-0 cursor-pointer border-b border-r p-2 transition hover:bg-primary/5 ${
+                className={`h-48 min-w-0 border-b border-r p-2 ${
                   day.isCurrentMonth ? "bg-white" : "bg-navy/5 text-muted-foreground"
                 }`}
                 key={day.date}
-                onClick={() => setDrawer({ date: day.date, mode: "create" })}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    setDrawer({ date: day.date, mode: "create" });
-                  }
-                }}
-                role="button"
-                tabIndex={0}
               >
-                <span className="block text-sm font-semibold text-navy">
-                  {day.dayNumber}
-                </span>
-                <div className="mt-2 flex h-36 flex-col gap-1 overflow-y-auto overscroll-contain pr-1" onClick={(event) => event.stopPropagation()}>
+                <div className="flex flex-wrap items-center justify-between gap-1">
+                  <span className="block text-sm font-semibold text-navy">{day.dayNumber}</span>
+                  <Button
+                    aria-label={`${formatDateOnly(day.date)} için görev ekle`}
+                    className="h-6 px-2 text-[11px]"
+                    onClick={() => setDrawer({ date: day.date, mode: "create" })}
+                    size="sm" type="button" variant="outline"
+                  >+ Görev Ekle</Button>
+                </div>
+                <div className="mt-2 flex h-32 flex-col gap-1 overflow-y-auto overscroll-contain pr-1">
                   {dayTasks.map((task) => (
                     <button
                       className="min-h-8 shrink-0 rounded-md border border-primary/20 bg-primary/10 px-2 py-1 text-left text-xs font-medium leading-4 text-navy underline-offset-2 transition hover:border-primary/40 hover:bg-primary/15 hover:underline"

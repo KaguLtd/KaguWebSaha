@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { requireAnyRole } from "@/lib/auth/session";
 import { formatDisplayDate, formatDisplayTime } from "@/lib/dates/format";
 import { prisma } from "@/lib/db/prisma";
+import { observerTimelineWhere } from "@/lib/timeline/access";
 
 export const dynamic = "force-dynamic";
 
@@ -33,13 +34,7 @@ export default async function ProjectDetailPage({
         },
       },
       timelineEvents: {
-        where:
-          user.role === "OBSERVER"
-            ? {
-                dailyTaskId: null,
-                OR: [{ projectVisitId: { not: null } }, { userId: user.id }],
-              }
-            : undefined,
+        where: user.role === "OBSERVER" ? observerTimelineWhere(user.id) : undefined,
         include: {
           user: true,
           file: true,

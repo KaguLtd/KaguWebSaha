@@ -8,6 +8,14 @@ import {
 
 beforeEach(() => { globalThis.fetch = async () => { throw new Error('Unexpected real network request'); }; });
 
+test('external abort stops a request even when fetch ignores the abort signal', async () => {
+  globalThis.fetch = async () => new Promise(() => {});
+  const controller = new AbortController();
+  const pending = requestJson('/cancel', { signal: controller.signal });
+  controller.abort();
+  await assert.rejects(pending, (error) => error instanceof JsonRequestError && error.message.includes('durduruldu'));
+});
+
 test('bounded JSON requests time out before headers even when a mocked fetch ignores abort', async () => {
   let signal;
   globalThis.fetch = async (_url, options) => { signal = options.signal; return new Promise(() => {}); };

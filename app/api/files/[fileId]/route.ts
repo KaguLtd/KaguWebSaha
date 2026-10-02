@@ -8,6 +8,7 @@ import { getCurrentUser } from "@/lib/auth/session";
 import { canReadProjectFile, readProjectFileForAccess } from "@/lib/files/access";
 import { resolveStoragePath } from "@/lib/files/storage";
 import { parseByteRange } from "@/lib/files/http-range";
+import { uniqueUploadName } from "@/lib/files/upload-name";
 
 export const runtime = "nodejs";
 
@@ -46,7 +47,7 @@ async function serveFile(
   } catch {
     return NextResponse.json({ error: "Dosya depoda bulunamadi." }, { status: 404 });
   }
-  const encodedFileName = encodeURIComponent(path.basename(file.originalName));
+  const encodedFileName = encodeURIComponent(uniqueUploadName(path.basename(file.originalName), file.mimeType, file.id));
   const url = new URL(request.url);
   const inlineType = file.mimeType === "application/pdf" || file.mimeType.startsWith("video/") ||
     ["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif", "image/bmp"].includes(file.mimeType);

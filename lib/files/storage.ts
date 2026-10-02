@@ -2,6 +2,7 @@ import { copyFile, mkdir, open, unlink, writeFile } from "fs/promises";
 import path from "path";
 import { randomUUID } from "crypto";
 import { Worker } from "worker_threads";
+import { uniqueUploadName } from "./upload-name";
 
 const DEFAULT_UPLOAD_DIR = "uploads";
 export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
@@ -200,6 +201,7 @@ export async function prepareStoredProjectUpload(
   sourceStoragePath: string,
   publicationId?: string,
 ): Promise<ProjectUploadResult> {
+  file = { ...file, name: uniqueUploadName(file.name, file.type, publicationId ?? randomUUID()) };
   if (file.size <= 0 || file.size > MAX_UPLOAD_BYTES) {
     throw new Error("Dosya boyutu 100 MB limitini asamaz.");
   }
@@ -275,7 +277,7 @@ export async function saveProjectUpload(file: UploadFile, projectId: string): Pr
     throw new Error("Dosya boyutu 100 MB limitini asamaz.");
   }
 
-  const originalName = file.name || "upload";
+  const originalName = uniqueUploadName(file.name || "upload", file.type, randomUUID());
   const fileBuffer: Buffer<ArrayBufferLike> = Buffer.from(await file.arrayBuffer());
 
   if (isHeicUpload(file, originalName, fileBuffer)) {
