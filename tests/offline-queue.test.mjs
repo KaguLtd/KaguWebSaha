@@ -702,3 +702,67 @@ test('receipt store upgrade preserves V1.1 pending data and original legacy data
   assert.deepEqual(await queue.listSuccessfulUploads(owner), []);
   assert.equal((await storedItems('kagu-saha-offline'))[0].id, 'v1-legacy');
 });
+
+test('stopping a hung upload releases its claim, retains its Blob and resumes the same session', { timeout: 5000 }, async () => {
+  const queue = await newTab();
+  const [item] = await queue.enqueueVisitUploads({ userId: owner, projectId: 'site', files: [video()] });
+  const started = deferred(); const hung = deferred(); const identities = [];
+  globalThis.fetch = async (url, options) => {
+    if (url === '/api/uploads') { identities.push(JSON.parse(options.body).clientUploadId); return ok({ uploadId: 'recover', sizeBytes: 32, offsetBytes: 0, status: 'OPEN' }); }
+    if (options?.method === 'PATCH') { started.resolve(); return hung.promise; }
+    throw new Error('Cancelled upload must not finalize');
+  };
+  const first = queue.syncOfflineItems({ userId: owner, kinds: ['VISIT_UPLOAD'] });
+  await started.promise;
+  await queue.stopOfflineSync(owner, 'VISIT_UPLOAD');
+  assert.equal((await first).remaining, 1);
+  const retained = (await queue.listOfflineItems(['VISIT_UPLOAD'], owner))[0];
+  assert.equal(retained.id, item.id); assert.equal(retained.files[0].size, 32);
+  assert.equal(retained.sendingUntil, undefined); assert.equal(retained.status, 'PENDING');
+  assert.equal((await queue.syncOfflineItems({ userId: owner, kinds: ['VISIT_UPLOAD'] })).synced, 0);
+  assert.equal(identities.length, 1, 'automatic sync does not restart a user-stopped upload');
+  globalThis.fetch = async (url, options) => {
+    if (url === '/api/uploads') { identities.push(JSON.parse(options.body).clientUploadId); return ok({ uploadId: 'recover', sizeBytes: 32, offsetBytes: 32, status: 'OPEN' }); }
+    return finalized('recover');
+  };
+  await queue.retryOfflineItem(item.id, owner);
+  assert.equal((await queue.syncOfflineItems({ userId: owner, kinds: ['VISIT_UPLOAD'], force: true })).synced, 1);
+  assert.equal(new Set(identities).size, 1);
+  hung.resolve(ok({ uploadId: 'recover', sizeBytes: 32, offsetBytes: 32, status: 'OPEN' }));
+  await tick(); assert.equal((await queue.listOfflineItems(['VISIT_UPLOAD'], owner)).length, 0);
+});
+
+test('explicit legacy cleanup removes both ownerless stores and preserves all owned accounts', async () => {
+  const queue = await newTab();
+  await queue.enqueueVisitUploads({ userId: owner, projectId: 'site', files: [video()] });
+  await queue.enqueueVisitUploads({ userId: 'other', projectId: 'site', files: [video()] });
+  await addLegacy({ id: 'old-v1', type: 'NOTE' }, 'kagu-saha-offline');
+  await addLegacy({ id: 'old-v11', type: 'NOTE' });
+  assert.equal(await queue.countLegacyOfflineItems(), 2);
+  await queue.clearLegacyOfflineItems();
+  assert.equal(await queue.countLegacyOfflineItems(), 0);
+  assert.equal((await queue.listOfflineItems(['VISIT_UPLOAD'], owner)).length, 1);
+  assert.equal((await queue.listOfflineItems(['VISIT_UPLOAD'], 'other')).length, 1);
+});
+
+test('visit camera images receive unique stable names and keep their bytes and MIME types', async () => {
+  const queue = await newTab();
+  const items = await queue.enqueueVisitUploads({ userId: owner, projectId: 'site', files: [new File(['one'], 'image', { type: 'image/jpeg' }), new File(['two'], 'image', { type: 'image/jpeg' })] });
+  assert.notEqual(items[0].files[0].name, items[1].files[0].name);
+  assert.match(items[0].files[0].name, /^ziyaret-image-.*\.jpg$/);
+  assert.equal(await items[0].files[0].text(), 'one'); assert.equal(items[0].files[0].type, 'image/jpeg');
+  assert.deepEqual((await queue.listOfflineItems(['VISIT_UPLOAD'], owner)).map((item) => item.files[0].name), items.map((item) => item.files[0].name));
+});
+
+test('batch progress is weighted by bytes and does not show 100 after only the small file', async () => {
+  const queue = await newTab();
+  await queue.enqueueVisitUploads({ userId: owner, projectId: 'site', files: [video(1), video(99)] });
+  let size; const reports = [];
+  globalThis.fetch = async (url, options) => {
+    if (url === '/api/uploads') { size = JSON.parse(options.body).sizeBytes; return ok({ uploadId: `upload-${size}`, sizeBytes: size, offsetBytes: size, status: 'OPEN' }); }
+    return finalized(`upload-${size}`, size);
+  };
+  await queue.syncOfflineItems({ userId: owner, kinds: ['VISIT_UPLOAD'], onProgress: (progress) => reports.push(progress) });
+  assert.equal(reports.find((row) => row.current === 1 && row.progress === 100).overallProgress, 1);
+  assert.equal(reports.at(-1).overallProgress, 100);
+});

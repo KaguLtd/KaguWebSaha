@@ -13,6 +13,7 @@ import { getDateOnlyRangeInAppTimeZone, getTodayDateOnly } from "@/lib/dates/tod
 import { prisma } from "@/lib/db/prisma";
 import { readProjectVisits } from "@/lib/visits/read";
 import { getVisitDayKey } from "@/lib/visits/status";
+import { observerTimelineWhere } from "@/lib/timeline/access";
 
 export const dynamic = "force-dynamic";
 
@@ -49,13 +50,7 @@ export default async function VisitProjectDetailPage({
         take: 12,
       },
       timelineEvents: {
-        where:
-          user.role === "OBSERVER"
-            ? {
-                dailyTaskId: null,
-                OR: [{ projectVisitId: { not: null } }, { userId: user.id }],
-              }
-            : undefined,
+        where: user.role === "OBSERVER" ? observerTimelineWhere(user.id) : undefined,
         include: {
           file: true,
           user: true,

@@ -15,8 +15,10 @@ export class JsonRequestError extends Error {
 export async function requestJson<T extends { ok: true }>(url: string, options: RequestInit = {}, timeoutMs = 30_000): Promise<T> {
   const controller = new AbortController();
   const externalSignal = options.signal;
-  const abort = () => controller.abort();
-  if (externalSignal?.aborted) controller.abort();
+  let rejectAbort: (error: Error) => void = () => {};
+  const cancelled = new Promise<never>((_, reject) => { rejectAbort = reject; });
+  const abort = () => { controller.abort(); rejectAbort(new JsonRequestError("Gönderim durduruldu. Kayıt cihazda korunuyor.", 0, "NETWORK")); };
+  if (externalSignal?.aborted) abort();
   externalSignal?.addEventListener("abort", abort, { once: true });
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
@@ -43,7 +45,7 @@ export async function requestJson<T extends { ok: true }>(url: string, options: 
     if (record?.ok !== true) throw new JsonRequestError("Sunucudan geçerli kayıt onayı alınamadı. Kayıt korunuyor.", 503, "INVALID_RESPONSE");
     return record as T;
   })();
-  try { return await Promise.race([operation, timeout]); }
+  try { return await Promise.race([operation, timeout, cancelled]); }
   catch (error) {
     if (error instanceof JsonRequestError) throw error;
     throw new JsonRequestError("Bağlantı kesildi. Kayıt korunuyor; tekrar deneyin.", 0, "NETWORK");
